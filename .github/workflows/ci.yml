@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    name: test (${{ matrix.toolchain }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ["1.85", stable]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - run: cargo test --workspace --all-targets
+      - run: cargo test --doc
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - run: cargo +nightly fmt --check
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --workspace --all-targets
+      - run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  bindings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release -p mini-waf-ffi
+      - name: C
+        run: |
+          cmake -S bindings/c -B target/c
+          cmake --build target/c
+          ctest --test-dir target/c --output-on-failure
+      - name: C++
+        run: |
+          cmake -S bindings/cpp -B target/cpp
+          cmake --build target/cpp
+          ctest --test-dir target/cpp --output-on-failure
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "22"
+      - name: Java
+        run: mvn -B test
+        working-directory: bindings/java
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: .NET
+        run: dotnet test
+        working-directory: bindings/dotnet
+        env:
+          MINI_WAF_LIBRARY_PATH: ${{ github.workspace }}/target/release
+
+  bindings-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: C and C++ (clang-format)
+        run: |
+          pipx run clang-format==23.1.1 --dry-run --Werror \
+            $(git ls-files 'bindings/c/*.[ch]' 'bindings/cpp/*.[ch]pp')
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Java (prettier-plugin-java)
+        run: npm ci && npm run format:check
+        working-directory: bindings/java
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: .NET (CSharpier)
+        run: dotnet tool restore && dotnet csharpier check .
+        working-directory: bindings/dotnet
+
