@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>MurylloEx.MiniWaf</RootNamespace>
+    <AssemblyName>MurylloEx.MiniWaf</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <IsAotCompatible>true</IsAotCompatible>
+
+    <PackageId>MurylloEx.MiniWaf</PackageId>
+    <Version>0.1.0</Version>
+    <Description>.NET binding of mini-waf, a minimalistic Web Application Firewall engine (P/Invoke over libmini_waf).</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/turrety/mini-waf-native</RepositoryUrl>
+  </PropertyGroup>
+</Project>

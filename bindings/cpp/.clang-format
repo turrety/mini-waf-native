@@ -1,0 +1,7 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 80
+AccessModifierOffset: -4
+PointerAlignment: Left
+SpacesBeforeTrailingComments: 2
+BreakTemplateDeclarations: Yes

@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniWaf", "MiniWaf\MiniWaf.csproj", "{76856537-8C93-431F-9AD7-CB43D8D00F5B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniWaf.Tests", "MiniWaf.Tests\MiniWaf.Tests.csproj", "{777213FD-4B0F-4221-9F68-AD04B711E85D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniWaf.Example", "MiniWaf.Example\MiniWaf.Example.csproj", "{7860F27B-D355-473E-A668-092F96D59AA5}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{76856537-8C93-431F-9AD7-CB43D8D00F5B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{76856537-8C93-431F-9AD7-CB43D8D00F5B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{76856537-8C93-431F-9AD7-CB43D8D00F5B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{76856537-8C93-431F-9AD7-CB43D8D00F5B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{777213FD-4B0F-4221-9F68-AD04B711E85D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{777213FD-4B0F-4221-9F68-AD04B711E85D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{777213FD-4B0F-4221-9F68-AD04B711E85D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{777213FD-4B0F-4221-9F68-AD04B711E85D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7860F27B-D355-473E-A668-092F96D59AA5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7860F27B-D355-473E-A668-092F96D59AA5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7860F27B-D355-473E-A668-092F96D59AA5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7860F27B-D355-473E-A668-092F96D59AA5}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "description": "Formatting tools of the Java binding (prettier-plugin-java).",
+  "scripts": {
+    "format": "prettier --write \"src/**/*.java\" \"examples/**/*.java\"",
+    "format:check": "prettier --check \"src/**/*.java\" \"examples/**/*.java\""
+  },
+  "devDependencies": {
+    "prettier": "3.9.9",
+    "prettier-plugin-java": "2.10.4"
+  }
+}

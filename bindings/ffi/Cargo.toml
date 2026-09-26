@@ -1,0 +1,19 @@
+[package]
+name = "mini-waf-ffi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "C ABI of mini-waf: the base of its C, C++, Java and .NET bindings."
+license = "MIT"
+repository = "https://github.com/turrety/mini-waf-native"
+publish = false
+
+[lib]
+name = "mini_waf"
+crate-type = ["cdylib", "staticlib"]
+# The core crate documents the `mini_waf` name; this one is its C ABI.
+doc = false
+
+[dependencies]
+# Renamed: this library is itself called `mini_waf`.
+waf = { package = "mini-waf", path = "../.." }
