@@ -19,7 +19,18 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest # Linux x64
+          - ubuntu-24.04-arm # Linux arm64
+          - windows-latest # Windows x64
+          - windows-11-arm # Windows arm64
+          - macos-latest # macOS arm64 (Apple Silicon)
+          - macos-15-intel # macOS x64
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

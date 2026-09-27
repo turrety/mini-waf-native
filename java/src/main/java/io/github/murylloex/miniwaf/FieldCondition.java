@@ -72,11 +72,22 @@ public final class FieldCondition extends NativeResource {
                 MemorySegment nativeSpec = arena.allocate(
                     Native.RATE_LIMIT_SPEC
                 );
-                nativeSpec.set(Native.I64, 0, spec.max());
-                nativeSpec.set(Native.I64, 8, spec.windowMs());
+                nativeSpec.set(
+                    Native.I64,
+                    Native.offset(Native.RATE_LIMIT_SPEC, "max"),
+                    spec.max()
+                );
+                nativeSpec.set(
+                    Native.I64,
+                    Native.offset(Native.RATE_LIMIT_SPEC, "window_ms"),
+                    spec.windowMs()
+                );
                 Native.writeStr(
                     arena,
-                    nativeSpec.asSlice(16, Native.STR),
+                    nativeSpec.asSlice(
+                        Native.offset(Native.RATE_LIMIT_SPEC, "key_prefix"),
+                        Native.STR
+                    ),
                     spec.keyPrefix().orElse(null)
                 );
                 Api.fieldConditionRateLimit(condition, nativeSpec);

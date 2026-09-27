@@ -178,12 +178,12 @@ public final class WafConfig extends NativeResource {
                 );
                 nativeCache.set(
                     Native.POINTER,
-                    0,
-                    optionalLong(arena, cache.max())
+                    Native.offset(Native.DECISION_CACHE_CONFIG, "max"),
+                    optionalSize(arena, cache.max())
                 );
                 nativeCache.set(
                     Native.POINTER,
-                    8,
+                    Native.offset(Native.DECISION_CACHE_CONFIG, "ttl_ms"),
                     optionalLong(arena, cache.ttlMs())
                 );
                 Api.wafConfigDecisionCache(config, nativeCache);
@@ -201,17 +201,17 @@ public final class WafConfig extends NativeResource {
                 );
                 nativeDecode.set(
                     Native.POINTER,
-                    0,
+                    Native.offset(Native.DECODE_CONFIG, "base64"),
                     optionalBool(arena, decode.base64())
                 );
                 nativeDecode.set(
                     Native.POINTER,
-                    8,
+                    Native.offset(Native.DECODE_CONFIG, "url"),
                     optionalBool(arena, decode.url())
                 );
                 nativeDecode.set(
                     Native.POINTER,
-                    16,
+                    Native.offset(Native.DECODE_CONFIG, "comments"),
                     optionalBool(arena, decode.comments())
                 );
                 Api.wafConfigDecode(config, nativeDecode);
@@ -224,6 +224,13 @@ public final class WafConfig extends NativeResource {
         return value == null
             ? MemorySegment.NULL
             : arena.allocateFrom(Native.I64, value);
+    }
+
+    /** A {@code size_t}, unlike {@link #optionalLong}'s 64-bit value. */
+    private static MemorySegment optionalSize(Arena arena, Long value) {
+        return value == null
+            ? MemorySegment.NULL
+            : Native.allocateSize(arena, value);
     }
 
     private static MemorySegment optionalBool(Arena arena, Boolean value) {

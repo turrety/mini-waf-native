@@ -9,8 +9,6 @@
  *     target/c/bench 100000     # custom iteration count
  */
 
-#define _POSIX_C_SOURCE 199309L
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -92,10 +90,22 @@ static MiniWafInstance *create(const ProtectionLevel *level, int cache) {
     return waf;
 }
 
+/* Microseconds since the first call. TIME_UTC marks a C library with the
+ * C11 wall clock; counting from a base keeps sub-microsecond precision in
+ * a double. Without it (the msvcrt of classic MinGW), the C89 processor
+ * clock is portable but coarser. */
 static double now_us(void) {
+#ifdef TIME_UTC
+    static time_t base = 0;
     struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec * 1e6 + ts.tv_nsec / 1e3;
+    timespec_get(&ts, TIME_UTC);
+    if (base == 0) {
+        base = ts.tv_sec;
+    }
+    return (double)(ts.tv_sec - base) * 1e6 + ts.tv_nsec / 1e3;
+#else
+    return (double)clock() * 1e6 / CLOCKS_PER_SEC;
+#endif
 }
 
 static int compare(const void *left, const void *right) {

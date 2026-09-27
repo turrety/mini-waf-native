@@ -23,7 +23,7 @@ public final class MiniWafInstance extends NativeResource {
             try (Arena arena = Arena.ofConfined()) {
                 MemorySegment count = arena.allocate(Native.SIZE);
                 MemorySegment rules = Api.miniWafInstanceRules(instance, count);
-                return views(rules, count.get(Native.SIZE, 0));
+                return views(rules, Native.getSize(count, 0));
             }
         });
     }
@@ -91,7 +91,7 @@ public final class MiniWafInstance extends NativeResource {
                 result,
                 len
             );
-            String reason = Native.string(reasonText, len.get(Native.SIZE, 0));
+            String reason = Native.string(reasonText, Native.getSize(len, 0));
             MemorySegment count = arena.allocate(Native.SIZE);
             MemorySegment logged = Api.wafEvaluationResultGetLoggedRules(
                 result,
@@ -99,7 +99,7 @@ public final class MiniWafInstance extends NativeResource {
             );
             List<WafRule> loggedRules = views(
                 logged,
-                count.get(Native.SIZE, 0)
+                Native.getSize(count, 0)
             );
             return new WafEvaluationResult(
                 decision,

@@ -27,19 +27,47 @@ env:
 
 jobs:
   test:
-    name: test (${{ matrix.toolchain }})
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        toolchain: ["1.85", stable]
+        os:
+          - ubuntu-latest # Linux x64
+          - ubuntu-24.04-arm # Linux arm64
+          - windows-latest # Windows x64
+          - windows-11-arm # Windows arm64
+          - macos-latest # macOS arm64 (Apple Silicon)
+          - macos-15-intel # macOS x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace --all-targets
+      - run: cargo test --workspace --doc
+
+  msrv:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ matrix.toolchain }}
+          toolchain: "1.85"
       - run: cargo test --workspace --all-targets
-      - run: cargo test --workspace --doc
+
+  test-32-bit:
+    name: test (i686 Linux, armv7 check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: i686-unknown-linux-gnu, armv7-unknown-linux-gnueabihf
+      - run: sudo apt-get update && sudo apt-get install -y gcc-multilib
+      - run: cargo test --workspace --target i686-unknown-linux-gnu
+      # No ARM linker on the runner: type-check every target instead.
+      - run: >-
+          cargo check --workspace --all-targets
+          --target armv7-unknown-linux-gnueabihf
 
   lint:
     runs-on: ubuntu-latest

@@ -7,20 +7,11 @@
 cmake_minimum_required(VERSION 3.25)
 project(mini_waf_cpp LANGUAGES CXX)
 
-set(MINI_WAF_LIBRARY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../target/release"
-    CACHE PATH "Directory holding libmini_waf")
-find_library(MINI_WAF_LIBRARY
-    NAMES mini_waf mini_waf.dll
-    PATHS "${MINI_WAF_LIBRARY_DIR}"
-    NO_DEFAULT_PATH
-    REQUIRED)
-
 # mini_waf.hpp wraps mini_waf.h, so both include directories are needed.
-add_library(mini_waf::mini_waf_cpp UNKNOWN IMPORTED)
-set_target_properties(mini_waf::mini_waf_cpp PROPERTIES
-    IMPORTED_LOCATION "${MINI_WAF_LIBRARY}"
-    INTERFACE_INCLUDE_DIRECTORIES
-        "${CMAKE_CURRENT_SOURCE_DIR}/include;${CMAKE_CURRENT_SOURCE_DIR}/../c/include")
+include(../c/cmake/MiniWafLibrary.cmake)
+mini_waf_import_library(mini_waf::mini_waf_cpp
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../c/include")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -42,13 +33,15 @@ if(NOT MSVC)
 endif()
 
 add_executable(protect examples/protect.cpp)
-target_link_libraries(protect PRIVATE mini_waf::mini_waf_cpp)
+mini_waf_link(protect mini_waf::mini_waf_cpp)
 
 add_executable(bench examples/bench.cpp)
-target_link_libraries(bench PRIVATE mini_waf::mini_waf_cpp)
+mini_waf_link(bench mini_waf::mini_waf_cpp)
 
 enable_testing()
 add_executable(test_mini_waf tests/test_mini_waf.cpp)
+# Linked first so the DLL is in place when Catch2 lists the tests.
+mini_waf_link(test_mini_waf mini_waf::mini_waf_cpp)
 target_link_libraries(test_mini_waf
-    PRIVATE mini_waf::mini_waf_cpp Catch2::Catch2WithMain Threads::Threads)
+    PRIVATE Catch2::Catch2WithMain Threads::Threads)
 catch_discover_tests(test_mini_waf)

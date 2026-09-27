@@ -32,14 +32,23 @@ final class Native {
 
     static final Linker LINKER = Linker.nativeLinker();
     static final SymbolLookup LIBRARY = loadLibrary();
+    /** Marks {@link #SIZE} in function descriptors. */
+    private static final String SIZE_T = "size_t";
 
     static final AddressLayout POINTER = ValueLayout.ADDRESS;
-    /** {@code size_t}; the binding supports 64-bit platforms only. */
-    static final ValueLayout.OfLong SIZE = ValueLayout.JAVA_LONG;
+    /**
+     * {@code size_t} as this platform defines it: 8 bytes on 64-bit
+     * platforms, 4 on 32-bit ones. Java code always handles it as a
+     * {@code long}; {@link #function} and {@link #upcall} convert.
+     */
+    static final ValueLayout SIZE = canonical("size_t").withName(SIZE_T);
     static final ValueLayout.OfInt ENUM = ValueLayout.JAVA_INT;
     static final ValueLayout.OfBoolean BOOL = ValueLayout.JAVA_BOOLEAN;
     static final ValueLayout.OfShort U16 = ValueLayout.JAVA_SHORT;
-    static final ValueLayout.OfLong I64 = ValueLayout.JAVA_LONG;
+    /** {@code int64_t} / {@code uint64_t}, aligned as this platform does. */
+    static final ValueLayout.OfLong I64 = (ValueLayout.OfLong) canonical(
+        "long long"
+    );
     static final ValueLayout.OfDouble F64 = ValueLayout.JAVA_DOUBLE;
 
     /** {@code MiniWafStr}: borrowed text. */
@@ -76,12 +85,13 @@ final class Native {
         STR.withName("originalname")
     );
 
+    private static ValueLayout canonical(String type) {
+        return (ValueLayout) Linker.nativeLinker()
+            .canonicalLayouts()
+            .get(type);
+    }
+
     private static SymbolLookup loadLibrary() {
-        if (ValueLayout.ADDRESS.byteSize() != 8) {
-            throw new UnsupportedOperationException(
-                "mini-waf needs a 64-bit JVM"
-            );
-        }
         String name = System.mapLibraryName("mini_waf");
         String directory = System.getProperty(
             "mini_waf.library.path",
@@ -101,7 +111,68 @@ final class Native {
         MemorySegment symbol = LIBRARY.find(name).orElseThrow(() ->
             new UnsatisfiedLinkError("libmini_waf has no " + name)
         );
-        return LINKER.downcallHandle(symbol, descriptor);
+        MethodHandle handle = LINKER.downcallHandle(symbol, descriptor);
+        return MethodHandles.explicitCastArguments(
+            handle,
+            widened(handle.type(), descriptor)
+        );
+    }
+
+    /**
+     * {@code type} with every {@code size_t} of {@code descriptor} as a
+     * {@code long}. Leading parameters the descriptor does not list (the
+     * allocator of a struct return) are kept.
+     */
+    private static MethodType widened(
+        MethodType type,
+        FunctionDescriptor descriptor
+    ) {
+        List<MemoryLayout> arguments = descriptor.argumentLayouts();
+        int offset = type.parameterCount() - arguments.size();
+        MethodType result = type;
+        for (int index = 0; index < arguments.size(); index++) {
+            if (isSize(arguments.get(index))) {
+                result = result.changeParameterType(offset + index, long.class);
+            }
+        }
+        boolean sizeResult = descriptor.returnLayout().map(Native::isSize)
+            .orElse(false);
+        return sizeResult ? result.changeReturnType(long.class) : result;
+    }
+
+    private static boolean isSize(MemoryLayout layout) {
+        return layout.name().filter(SIZE_T::equals).isPresent();
+    }
+
+    /** Read a {@code size_t} at {@code offset}. */
+    static long getSize(MemorySegment segment, long offset) {
+        if (SIZE instanceof ValueLayout.OfLong wide) {
+            return segment.get(wide, offset);
+        }
+        return Integer.toUnsignedLong(
+            segment.get((ValueLayout.OfInt) SIZE, offset)
+        );
+    }
+
+    /** The byte offset of the member {@code name} of {@code layout}. */
+    static long offset(StructLayout layout, String name) {
+        return layout.byteOffset(MemoryLayout.PathElement.groupElement(name));
+    }
+
+    /** A new {@code size_t} holding {@code value}. */
+    static MemorySegment allocateSize(Arena arena, long value) {
+        MemorySegment size = arena.allocate(SIZE);
+        setSize(size, 0, value);
+        return size;
+    }
+
+    /** Write a {@code size_t} at {@code offset}. */
+    static void setSize(MemorySegment segment, long offset, long value) {
+        if (SIZE instanceof ValueLayout.OfLong wide) {
+            segment.set(wide, offset, value);
+        } else {
+            segment.set((ValueLayout.OfInt) SIZE, offset, (int) value);
+        }
     }
 
     /**
@@ -118,9 +189,13 @@ final class Native {
             MethodHandle target = lookup.findStatic(
                 lookup.lookupClass(),
                 name,
-                type
+                widened(type, descriptor)
             );
-            return LINKER.upcallStub(target, descriptor, Arena.global());
+            return LINKER.upcallStub(
+                MethodHandles.explicitCastArguments(target, type),
+                descriptor,
+                Arena.global()
+            );
         } catch (ReflectiveOperationException error) {
             throw new ExceptionInInitializerError(error);
         }
@@ -184,12 +259,12 @@ final class Native {
     static void writeStr(Arena arena, MemorySegment str, String value) {
         if (value == null) {
             str.set(POINTER, 0, MemorySegment.NULL);
-            str.set(SIZE, POINTER.byteSize(), 0L);
+            setSize(str, POINTER.byteSize(), 0L);
             return;
         }
         MemorySegment bytes = text(arena, value);
         str.set(POINTER, 0, bytes);
-        str.set(SIZE, POINTER.byteSize(), length(bytes));
+        setSize(str, POINTER.byteSize(), length(bytes));
     }
 
     /**

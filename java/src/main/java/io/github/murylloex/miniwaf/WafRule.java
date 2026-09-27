@@ -184,7 +184,7 @@ public final class WafRule implements AutoCloseable {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment len = arena.allocate(Native.SIZE);
             MemorySegment text = getter.get(rule, len);
-            return Native.string(text, len.get(Native.SIZE, 0));
+            return Native.string(text, Native.getSize(len, 0));
         }
     }
 

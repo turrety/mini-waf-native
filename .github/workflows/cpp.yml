@@ -6,6 +6,7 @@ on:
     paths:
       - "cpp/**"
       - "c/include/**"
+      - "c/cmake/**"
       - "rust/**"
       - "rust-ffi/**"
       - "Cargo.*"
@@ -14,6 +15,7 @@ on:
     paths:
       - "cpp/**"
       - "c/include/**"
+      - "c/cmake/**"
       - "rust/**"
       - "rust-ffi/**"
       - "Cargo.*"
@@ -21,14 +23,62 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest # Linux x64
+          - ubuntu-24.04-arm # Linux arm64
+          - windows-latest # Windows x64
+          - windows-11-arm # Windows arm64
+          - macos-latest # macOS arm64 (Apple Silicon)
+          - macos-15-intel # macOS x64
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release -p mini-waf-ffi
       - run: cmake -S cpp -B target/cpp
-      - run: cmake --build target/cpp
-      - run: ctest --test-dir target/cpp --output-on-failure
+      - run: cmake --build target/cpp --config Release
+      - run: >-
+          ctest --test-dir target/cpp --build-config Release
+          --output-on-failure
+
+  test-32-bit:
+    name: test (${{ matrix.os }}, 32-bit)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: i686-unknown-linux-gnu
+            flags: -m32
+          - os: windows-latest
+            target: i686-pc-windows-msvc
+            generator: -A Win32
+    env:
+      CFLAGS: ${{ matrix.flags }}
+      CXXFLAGS: ${{ matrix.flags }}
+      LDFLAGS: ${{ matrix.flags }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y g++-multilib
+      - run: >-
+          cargo build --release -p mini-waf-ffi
+          --target ${{ matrix.target }}
+      - run: >-
+          cmake -S cpp -B target/cpp-32 ${{ matrix.generator }}
+          -DMINI_WAF_LIBRARY_DIR:PATH=target/${{ matrix.target }}/release
+      - run: cmake --build target/cpp-32 --config Release
+      - run: >-
+          ctest --test-dir target/cpp-32 --build-config Release
+          --output-on-failure
 
   format:
     runs-on: ubuntu-latest

@@ -62,7 +62,7 @@ public final class MiniWaf {
                     Native.takeString(error.get(Native.POINTER, 0))
                 );
             }
-            long size = count.get(Native.SIZE, 0);
+            long size = Native.getSize(count, 0);
             MemorySegment array = rules.reinterpret(
                 size * Native.POINTER.byteSize()
             );
