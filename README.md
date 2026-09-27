@@ -143,7 +143,7 @@ assert_eq!(
 assert_eq!(response.status, 403);
 ```
 
-`result` is a `WafEvaluationResult`: `decision`, `matched_rule`, `reason` and `logged_rules` (rules with action `Log` that matched). A dependency-free runnable server lives in [`examples/std_server.rs`](examples/std_server.rs):
+`result` is a `WafEvaluationResult`: `decision`, `matched_rule`, `reason` and `logged_rules` (rules with action `Log` that matched). A dependency-free runnable server lives in [`rust/examples/std_server.rs`](rust/examples/std_server.rs):
 
 ```sh
 cargo run --example std_server
@@ -635,12 +635,12 @@ Same machine and the same cases as the TypeScript benchmarks (AMD Ryzen 7 5700X3
 | Case | Rules | Rust p50 | TypeScript p50 |
 |---|---:|---:|---:|
 | `Balanced`, clean request | 50 | **7.0 µs** | 13.7 µs |
-| + 8 KB JSON body | 50 | **63 µs** | 131.7 µs |
+| + 8 KB JSON body | 50 | **58 µs** | 131.7 µs |
 | SQLi, block path | 50 | **5.1 µs** | 8.6 µs |
-| `Low` / `High` / `Paranoid`, clean | 19 / 80 / 93 | **3.6 / 12.4 / 13.0 µs** | 6.9 / 28.1 / 31.0 µs |
-| decision-cache hit | 50 | **0.69 µs** | 2.0 µs |
+| `Low` / `High` / `Paranoid`, clean | 19 / 80 / 93 | **3.5 / 12.2 / 12.8 µs** | 6.9 / 28.1 / 31.0 µs |
+| decision-cache hit | 50 | **0.62 µs** | 2.0 µs |
 
-Rust figures are the median of four runs; run-to-run variance is up to ±10%. Details and methodology in [BENCHMARKS.md](BENCHMARKS.md).
+Rust figures are the median of four runs; run-to-run variance is up to ±10%. Through the bindings a clean `Balanced` request costs 7.8 µs in C, 8.3 µs in C++, 9.5 µs in Java and 9.8 µs in .NET. GoTestWAF scores about 90 on injection tests in every language. Details and methodology in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Coming from TypeScript
 
@@ -690,13 +690,14 @@ The engine is the same design — configuration resolved once, `build_rule_list`
 
 ## C, C++, Java and .NET
 
-[`bindings/`](bindings) exposes the crate to C, C++ (header-only), Java 22+
-(FFM API) and .NET 8+ through one C ABI library, `libmini_waf`, built by
+[`c/`](c), [`cpp/`](cpp) (header-only), [`java/`](java) (Java 22+, FFM
+API) and [`dotnet/`](dotnet) (.NET 8+) expose the crate through one C ABI
+library, `libmini_waf`, built from [`rust-ffi/`](rust-ffi) by
 `cargo build --release -p mini-waf-ffi`. Every binding keeps the Rust names,
 recased for the language (`create_mini_waf` is `MiniWaf.createMiniWaf` in
 Java and `MiniWaf.CreateMiniWaf` in C#), so this README applies to all of
-them. See [`bindings/README.md`](bindings/README.md) for building, the name
-map and what is not exposed.
+them. See [`BINDINGS.md`](BINDINGS.md) for building, the name map and what
+is not exposed.
 
 ## Development
 
@@ -708,7 +709,7 @@ cargo run --release --example bench         # engine benchmarks
 cargo run --example std_server              # demo server on :8080
 ```
 
-`tests/presets.rs` holds the attack corpus (asserting **which** rule id fires) and a benign corpus that must stay allowed at `High` / `Paranoid`. A new or changed preset that blocks any benign entry is a false positive — the failure mode that gets a WAF turned off.
+`rust/tests/presets.rs` holds the attack corpus (asserting **which** rule id fires) and a benign corpus that must stay allowed at `High` / `Paranoid`. A new or changed preset that blocks any benign entry is a false positive — the failure mode that gets a WAF turned off.
 
 ## License
 

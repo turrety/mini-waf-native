@@ -1,17 +1,17 @@
 # mini-waf bindings
 
 C, C++, Java and .NET bindings of the `mini-waf` crate. All four sit on
-one C ABI, `libmini_waf`, built from `bindings/ffi`. Each binding keeps
+one C ABI, `libmini_waf`, built from `rust-ffi/`. Each binding keeps
 the Rust names and changes only their casing, so the crate docs and the
 main README apply to every language.
 
-| Folder    | Language             | Built with | Requires         |
-| --------- | -------------------- | ---------- | ---------------- |
-| `ffi/`    | Rust (`cdylib`)      | Cargo      | Rust 1.85        |
-| `c/`      | C11                  | CMake      | a C11 compiler   |
-| `cpp/`    | C++17, header-only   | CMake      | a C++17 compiler |
-| `java/`   | Java (FFM API)       | Maven      | JDK 22+          |
-| `dotnet/` | C# (`LibraryImport`) | .NET SDK   | .NET 8+          |
+| Folder      | Language             | Built with | Requires         |
+| ----------- | -------------------- | ---------- | ---------------- |
+| `rust-ffi/` | Rust (`cdylib`)      | Cargo      | Rust 1.85        |
+| `c/`        | C11                  | CMake      | a C11 compiler   |
+| `cpp/`      | C++17, header-only   | CMake      | a C++17 compiler |
+| `java/`     | Java (FFM API)       | Maven      | JDK 22+          |
+| `dotnet/`   | C# (`LibraryImport`) | .NET SDK   | .NET 8+          |
 
 ## Building the library
 
@@ -29,7 +29,7 @@ The API is `c/include/mini_waf.h`. The header starts with its
 conventions: ownership, text, optional values and callbacks.
 
 ```bash
-cmake -S bindings/c -B target/c && cmake --build target/c
+cmake -S c -B target/c && cmake --build target/c
 ctest --test-dir target/c --output-on-failure
 target/c/protect
 ```
@@ -43,10 +43,14 @@ The CMake project exports the imported target `mini_waf::mini_waf`. Set
 Ownership is RAII and errors are exceptions.
 
 ```bash
-cmake -S bindings/cpp -B target/cpp && cmake --build target/cpp
+cmake -S cpp -B target/cpp && cmake --build target/cpp
 ctest --test-dir target/cpp --output-on-failure
 target/cpp/protect
 ```
+
+The tests are Catch2 v3 BDD scenarios (`SCENARIO` / `GIVEN` / `WHEN` /
+`THEN`). CMake fetches Catch2 on the first configure, so that step needs
+network access; the header itself has no dependency.
 
 ```cpp
 auto waf = mini_waf::create_mini_waf(
@@ -62,7 +66,7 @@ This binding uses the Foreign Function & Memory API. The package is
 methods of `MiniWaf`.
 
 ```bash
-cd bindings/java
+cd java
 mvn -B test
 ```
 
@@ -85,9 +89,9 @@ The namespace and package are `MurylloEx.MiniWaf`. The crate's free
 functions are static methods of `MiniWaf`.
 
 ```bash
-cd bindings/dotnet
+cd dotnet
 dotnet test
-MINI_WAF_LIBRARY_PATH=$PWD/../../target/release \
+MINI_WAF_LIBRARY_PATH=$PWD/../target/release \
     dotnet run --project MiniWaf.Example
 ```
 
@@ -101,6 +105,15 @@ using MiniWafInstance waf = MiniWaf.CreateMiniWaf(new WafConfig()
     .Presets(WafPresetName.Default)
     .Level(ProtectionLevel.Balanced));
 ```
+
+## Benchmarks
+
+Every binding has an A0–A6 harness that mirrors `examples/bench.rs` and
+goes through `create_adapter` / `protect`: `c/examples/bench.c`,
+`cpp/examples/bench.cpp`, `java/examples/Bench.java` and
+`dotnet/MiniWaf.Bench`. Build C and C++ with
+`-DCMAKE_BUILD_TYPE=Release`. The commands and the results are in
+[`BENCHMARKS.md`](BENCHMARKS.md#bindings).
 
 ## Names
 
@@ -163,24 +176,25 @@ A few names cannot be kept exactly:
 
 ## Formatting
 
-Every language is formatted to 80 columns by its usual tool, and CI checks
-all of them:
+Every language is kept to 80 columns by its usual tool, and CI checks all
+of them:
 
 ```bash
 # C and C++: clang-format (c/.clang-format, cpp/.clang-format)
-pipx run clang-format==23.1.1 -i bindings/c/*/*.[ch] bindings/cpp/*/*.[ch]pp
-# Java: prettier-plugin-java (java/.prettierrc.json)
-cd bindings/java && npm ci && npm run format
+pipx run clang-format==23.1.1 -i c/*/*.[ch] cpp/*/*.[ch]pp
+# Java: Checkstyle (java/checkstyle.xml); it checks, it does not rewrite
+cd java && mvn checkstyle:check
 # .NET: CSharpier (dotnet/.csharpierrc.json)
-cd bindings/dotnet && dotnet tool restore && dotnet csharpier format .
+cd dotnet && dotnet tool restore && dotnet csharpier format .
 ```
 
 These formatters do not wrap comments, so wrap long comments by hand.
 
 ## Maintenance
 
-- `ffi/tests/header.rs` checks that `mini_waf.h` declares exactly the
+- `rust-ffi/tests/header.rs` checks that `mini_waf.h` declares exactly the
   functions the crate exports.
 - `java/.../Api.java` and `dotnet/MiniWaf/Api.cs` mirror the header one
   function per method. Keep them in sync when the header changes.
-- CI builds the library and runs the C, C++, Java and .NET tests.
+- CI has one workflow per language (`.github/workflows/`); each builds
+  the library and runs that binding's tests and format check.
