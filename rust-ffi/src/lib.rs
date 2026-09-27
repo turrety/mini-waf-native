@@ -22,6 +22,8 @@ mod context;
 mod enums;
 mod ffi;
 mod instance;
+mod logger;
+mod rate_limit;
 mod rules;
 mod text;
 mod values;

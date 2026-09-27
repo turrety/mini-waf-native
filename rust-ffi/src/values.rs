@@ -1,6 +1,6 @@
 //! HTTP values host callbacks fill in: `MiniWafString`, `HeaderMap`,
-//! `QueryMap` / `QueryValue`, `CookieMap`, `RawBody` and `FilesBag`, plus
-//! the IP helpers.
+//! `QueryMap` / `QueryValue`, `CookieMap`, `RawBody` and `FilesBag`; the
+//! readers of the maps a logger receives; and the IP helpers.
 
 use std::ffi::c_char;
 use std::ptr;
@@ -10,6 +10,7 @@ use waf::{
     FilesBag,
     HeaderMap,
     HeaderValue,
+    OrderedMap,
     QueryMap,
     QueryValue,
     RawBody,
@@ -30,6 +31,8 @@ use crate::ffi::{
     text,
     texts,
     update,
+    write,
+    write_option,
 };
 
 /// A string a callback returns: `MiniWafString` in C, written with
@@ -196,6 +199,216 @@ pub unsafe extern "C" fn mini_waf_raw_body_bytes(
     }
 }
 
+/// Entry `index` of an ordered map, or `None` past the end.
+///
+/// # Safety
+///
+/// `map` must be null or point to a live map.
+unsafe fn entry_at<'a, V>(
+    map: *const OrderedMap<V>,
+    index: usize,
+) -> Option<(&'a String, &'a V)> {
+    // SAFETY: forwarded from the caller.
+    unsafe { map.as_ref() }.and_then(|map| map.iter().nth(index))
+}
+
+/// The number of entries of a map, `0` for `NULL`.
+///
+/// # Safety
+///
+/// `map` must be null or point to a live map.
+unsafe fn map_len<V>(map: *const OrderedMap<V>) -> usize {
+    // SAFETY: forwarded from the caller.
+    unsafe { map.as_ref() }.map_or(0, OrderedMap::len)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mini_waf_header_map_len(
+    headers: *const HeaderMap,
+) -> usize {
+    // SAFETY: `headers` is null or a live map.
+    unsafe { map_len(headers) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mini_waf_header_map_get_at(
+    headers: *const HeaderMap,
+    index: usize,
+    name: *mut MiniWafStr,
+    multi: *mut bool,
+    value_count: *mut usize,
+) -> bool {
+    // SAFETY: `headers` is null or a live map.
+    let Some((key, value)) = (unsafe { entry_at(headers, index) }) else {
+        return false;
+    };
+    let (is_multi, count) = match value {
+        HeaderValue::Single(_) => (false, 1),
+        HeaderValue::Multi(values) => (true, values.len()),
+    };
+    // SAFETY: every out-pointer is null or writable.
+    unsafe {
+        write(name, MiniWafStr::of(key));
+        write(multi, is_multi);
+        write(value_count, count);
+    }
+    true
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mini_waf_header_map_get_value_at(
+    headers: *const HeaderMap,
+    index: usize,
+    value_index: usize,
+    value: *mut MiniWafStr,
+) -> bool {
+    // SAFETY: `headers` is null or a live map.
+    let found =
+        unsafe { entry_at(headers, index) }.and_then(
+            |(_, header)| match header {
+                HeaderValue::Single(text) => (value_index == 0).then_some(text),
+                HeaderValue::Multi(values) => values.get(value_index),
+            },
+        );
+    // SAFETY: `value` is null or writable.
+    unsafe { write_option(value, found.map(|text| MiniWafStr::of(text))) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mini_waf_cookie_map_len(
+    cookies: *const CookieMap,
+) -> usize {
+    // SAFETY: `cookies` is null or a live map.
+    unsafe { map_len(cookies) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mini_waf_cookie_map_get_at(
+    cookies: *const CookieMap,
+    index: usize,
+    name: *mut MiniWafStr,
+    value: *mut MiniWafStr,
+) -> bool {
+    // SAFETY: `cookies` is null or a live map.
+    let Some((key, text)) = (unsafe { entry_at(cookies, index) }) else {
+        return false;
+    };
+    // SAFETY: both out-pointers are null or writable.
+    unsafe {
+        write(name, MiniWafStr::of(key));
+        write(value, MiniWafStr::of(text));
+    }
+    true
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mini_waf_query_map_len(
+    query: *const QueryMap,
+) -> usize {
+    // SAFETY: `query` is null or a live map.
+    unsafe { map_len(query) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mini_waf_query_map_get_at(
+    query: *const QueryMap,
+    index: usize,
+    key: *mut MiniWafStr,
+) -> *const QueryValue {
+    // SAFETY: `query` is null or a live map.
+    let Some((name, value)) = (unsafe { entry_at(query, index) }) else {
+        return ptr::null();
+    };
+    // SAFETY: `key` is null or writable.
+    unsafe { write(key, MiniWafStr::of(name)) };
+    value
+}
+
+/// `QueryValueKind` in C, in declaration order.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mini_waf_query_value_kind(
+    value: *const QueryValue,
+) -> u32 {
+    // SAFETY: `value` is null or a live value.
+    match unsafe { value.as_ref() } {
+        None | Some(QueryValue::Null) => 0,
+        Some(QueryValue::Bool(_)) => 1,
+        Some(QueryValue::Number(_)) => 2,
+        Some(QueryValue::String(_)) => 3,
+        Some(QueryValue::Array(_)) => 4,
+        Some(QueryValue::Object(_)) => 5,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mini_waf_query_value_get_bool(
+    value: *const QueryValue,
+) -> bool {
+    // SAFETY: `value` is null or a live value.
+    matches!(unsafe { value.as_ref() }, Some(QueryValue::Bool(true)))
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mini_waf_query_value_get_number(
+    value: *const QueryValue,
+) -> f64 {
+    // SAFETY: `value` is null or a live value.
+    match unsafe { value.as_ref() } {
+        Some(QueryValue::Number(number)) => *number,
+        _ => 0.0,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mini_waf_query_value_get_string(
+    value: *const QueryValue,
+    out: *mut MiniWafStr,
+) -> bool {
+    // SAFETY: `value` is null or a live value.
+    let text = match unsafe { value.as_ref() } {
+        Some(QueryValue::String(text)) => Some(MiniWafStr::of(text)),
+        _ => None,
+    };
+    // SAFETY: `out` is null or writable.
+    unsafe { write_option(out, text) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mini_waf_query_value_array_len(
+    value: *const QueryValue,
+) -> usize {
+    // SAFETY: `value` is null or a live value.
+    match unsafe { value.as_ref() } {
+        Some(QueryValue::Array(values)) => values.len(),
+        _ => 0,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mini_waf_query_value_array_get(
+    value: *const QueryValue,
+    index: usize,
+) -> *const QueryValue {
+    // SAFETY: `value` is null or a live value.
+    match unsafe { value.as_ref() } {
+        Some(QueryValue::Array(values)) => {
+            values.get(index).map_or(ptr::null(), ptr::from_ref)
+        }
+        _ => ptr::null(),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mini_waf_query_value_get_object(
+    value: *const QueryValue,
+) -> *const QueryMap {
+    // SAFETY: `value` is null or a live value.
+    match unsafe { value.as_ref() } {
+        Some(QueryValue::Object(map)) => map,
+        _ => ptr::null(),
+    }
+}
+
 /// `UploadedFile` in C: `NULL` members are `None`.
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -207,6 +420,16 @@ pub struct ForeignUploadedFile {
 }
 
 impl ForeignUploadedFile {
+    /// Borrow `file`: valid while `file` is.
+    pub fn of(file: &UploadedFile) -> Self {
+        Self {
+            fieldname: MiniWafStr::of_option(file.fieldname.as_deref()),
+            name: MiniWafStr::of_option(file.name.as_deref()),
+            filename: MiniWafStr::of_option(file.filename.as_deref()),
+            originalname: MiniWafStr::of_option(file.originalname.as_deref()),
+        }
+    }
+
     /// # Safety
     ///
     /// Every member must satisfy [`MiniWafStr::to_option`].

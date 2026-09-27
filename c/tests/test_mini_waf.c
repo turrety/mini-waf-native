@@ -125,7 +125,7 @@ static CustomAdapter *toy_adapter(void) {
 }
 
 /* audit-admin (log) and login-rate-limit (1 request per minute per IP). */
-static MiniWafInstance *toy_waf(void) {
+static WafConfig *toy_config(void) {
     WafField *path = mini_waf_waf_field_from_str(TEXT("path"), NULL);
     WafField *ip = mini_waf_waf_field_from_str(TEXT("ip"), NULL);
 
@@ -156,10 +156,7 @@ static MiniWafInstance *toy_waf(void) {
     const WafRule *rules[] = {audit, rate_limit};
     mini_waf_waf_config_rules(config, rules, 2);
 
-    MiniWafInstance *waf = mini_waf_create_mini_waf(config);
-
     /* Every input was copied: free the building blocks right away. */
-    mini_waf_waf_config_free(config);
     mini_waf_waf_rule_free(rate_limit);
     mini_waf_waf_rule_free(audit);
     mini_waf_waf_condition_free(when_login);
@@ -171,6 +168,13 @@ static MiniWafInstance *toy_waf(void) {
     mini_waf_field_condition_free(is_admin);
     mini_waf_waf_field_free(ip);
     mini_waf_waf_field_free(path);
+    return config;
+}
+
+static MiniWafInstance *toy_waf(void) {
+    WafConfig *config = toy_config();
+    MiniWafInstance *waf = mini_waf_create_mini_waf(config);
+    mini_waf_waf_config_free(config);
     return waf;
 }
 
@@ -350,11 +354,27 @@ static void ctx_headers(void *self, HeaderMap *out) {
     mini_waf_header_map_insert(out, TEXT("user-agent"), &value, 1);
 }
 
+/* ?debug=1&filter[status]=open&tags[]=a&tags[]=b */
 static void ctx_query(void *self, QueryMap *out) {
-    QueryValue *value = mini_waf_query_value_string(TEXT("1"));
+    QueryValue *debug = mini_waf_query_value_string(TEXT("1"));
+    QueryMap *filter_map = mini_waf_query_map_new();
+    QueryValue *open = mini_waf_query_value_string(TEXT("open"));
+    mini_waf_query_map_insert(filter_map, TEXT("status"), open);
+    QueryValue *filter = mini_waf_query_value_object(filter_map);
+    const QueryValue *items[] = {mini_waf_query_value_string(TEXT("a")),
+                                 mini_waf_query_value_string(TEXT("b"))};
+    QueryValue *tags = mini_waf_query_value_array(items, 2);
     (void)self;
-    mini_waf_query_map_insert(out, TEXT("debug"), value);
-    mini_waf_query_value_free(value);
+    mini_waf_query_map_insert(out, TEXT("debug"), debug);
+    mini_waf_query_map_insert(out, TEXT("filter"), filter);
+    mini_waf_query_map_insert(out, TEXT("tags"), tags);
+    mini_waf_query_value_free(tags);
+    mini_waf_query_value_free((QueryValue *)items[1]);
+    mini_waf_query_value_free((QueryValue *)items[0]);
+    mini_waf_query_value_free(filter);
+    mini_waf_query_value_free(open);
+    mini_waf_query_map_free(filter_map);
+    mini_waf_query_value_free(debug);
 }
 
 static void ctx_cookies(void *self, CookieMap *out) {
@@ -393,16 +413,21 @@ static void ctx_drop(void *self, const uint16_t *status_code, const char *body,
     ctx->status = status_code ? *status_code : 403;
 }
 
-static void test_handle_evaluates_a_context(void) {
-    MiniWafInstance *waf = toy_waf();
-    FixedContext state = {0, false};
+static WafHttpContext fixed_context(FixedContext *state) {
     WafHttpContext ctx = {
-        &state,         ctx_framework, ctx_method,     ctx_url,
+        state,          ctx_framework, ctx_method,     ctx_url,
         ctx_path,       ctx_ip,        ctx_protocol,   ctx_local_port,
         ctx_header,     ctx_headers,   ctx_query,      ctx_cookies,
         ctx_raw_body,   ctx_files,     ctx_set_header, ctx_remove_header,
         ctx_is_blocked, ctx_drop,
     };
+    return ctx;
+}
+
+static void test_handle_evaluates_a_context(void) {
+    MiniWafInstance *waf = toy_waf();
+    FixedContext state = {0, false};
+    WafHttpContext ctx = fixed_context(&state);
 
     WafEvaluationResult *result = mini_waf_mini_waf_instance_handle(waf, &ctx);
     CHECK(mini_waf_waf_evaluation_result_get_decision(result) ==
@@ -414,6 +439,278 @@ static void test_handle_evaluates_a_context(void) {
     ctx.drop = NULL;
     CHECK(mini_waf_mini_waf_instance_handle(waf, &ctx) == NULL);
     mini_waf_mini_waf_instance_free(waf);
+}
+
+/* What the logger callbacks saw. */
+typedef struct LogEvents {
+    int blocked;
+    int audit;
+    int connection;
+    int dropped;
+    const WafRule *rule_view;
+    char rule[64];
+    char line[128];
+    char header[128];
+    char query[128];
+    char cookie[64];
+    char file[64];
+    char body[64];
+    unsigned port;
+} LogEvents;
+
+static const char *ref_text(const char *text) { return text ? text : "-"; }
+
+static void format_str(char *out, size_t size, MiniWafStr text) {
+    snprintf(out, size, "%.*s", (int)text.len, text.data);
+}
+
+/* "name=value" for the first header (all its values, comma-separated). */
+static void describe_headers(char *out, size_t size, const HeaderMap *map) {
+    MiniWafStr name = {NULL, 0};
+    bool multi = true;
+    size_t count = 0;
+    if (!mini_waf_header_map_get_at(map, 0, &name, &multi, &count)) {
+        snprintf(out, size, "none");
+        return;
+    }
+    size_t used =
+        (size_t)snprintf(out, size, "%zu:%.*s%s=", mini_waf_header_map_len(map),
+                         (int)name.len, name.data, multi ? "[]" : "");
+    for (size_t index = 0; index < count && used < size; index++) {
+        MiniWafStr value = {NULL, 0};
+        mini_waf_header_map_get_value_at(map, 0, index, &value);
+        used += (size_t)snprintf(out + used, size - used, "%s%.*s",
+                                 index ? "," : "", (int)value.len, value.data);
+    }
+    CHECK(!mini_waf_header_map_get_at(map, count + 99, NULL, NULL, NULL));
+}
+
+/* The query as "key=value;" pairs, nesting written as JSON-like text. */
+static size_t describe_value(char *out, size_t size, const QueryValue *value) {
+    MiniWafStr text = {NULL, 0};
+    switch (mini_waf_query_value_kind(value)) {
+    case QUERY_VALUE_KIND_STRING:
+        mini_waf_query_value_get_string(value, &text);
+        return (size_t)snprintf(out, size, "%.*s", (int)text.len, text.data);
+    case QUERY_VALUE_KIND_ARRAY: {
+        size_t used = (size_t)snprintf(out, size, "[");
+        for (size_t index = 0;
+             index < mini_waf_query_value_array_len(value) && used < size;
+             index++) {
+            used += (size_t)snprintf(out + used, size - used, "%s",
+                                     index ? "," : "");
+            used +=
+                describe_value(out + used, size - used,
+                               mini_waf_query_value_array_get(value, index));
+        }
+        return used + (size_t)snprintf(out + used, size - used, "]");
+    }
+    case QUERY_VALUE_KIND_OBJECT: {
+        const QueryMap *map = mini_waf_query_value_get_object(value);
+        MiniWafStr key = {NULL, 0};
+        const QueryValue *inner = mini_waf_query_map_get_at(map, 0, &key);
+        size_t used =
+            (size_t)snprintf(out, size, "{%.*s:", (int)key.len, key.data);
+        used += describe_value(out + used, size - used, inner);
+        return used + (size_t)snprintf(out + used, size - used, "}");
+    }
+    default:
+        return (size_t)snprintf(out, size, "?");
+    }
+}
+
+static void describe_query(char *out, size_t size, const QueryMap *map) {
+    size_t used = 0;
+    for (size_t index = 0; index < mini_waf_query_map_len(map); index++) {
+        MiniWafStr key = {NULL, 0};
+        const QueryValue *value = mini_waf_query_map_get_at(map, index, &key);
+        used += (size_t)snprintf(out + used, size - used, "%.*s=", (int)key.len,
+                                 key.data);
+        used += describe_value(out + used, size - used, value);
+        used += (size_t)snprintf(out + used, size - used, ";");
+    }
+    CHECK(mini_waf_query_map_get_at(map, 99, NULL) == NULL);
+}
+
+static void record(LogEvents *events, const WafHttpContextRef *ctx,
+                   const WafRule *rule) {
+    MiniWafStr name = {NULL, 0};
+    MiniWafStr value = {NULL, 0};
+    size_t files = 0;
+    const UploadedFile *file =
+        mini_waf_waf_http_context_ref_get_files(ctx, &files);
+    events->rule_view = rule;
+    snprintf(events->rule, sizeof events->rule, "%s",
+             ref_text(mini_waf_waf_rule_get_id(rule, NULL)));
+    snprintf(events->line, sizeof events->line, "%s %s %s %s %s",
+             ref_text(mini_waf_waf_http_context_ref_framework(ctx, NULL)),
+             ref_text(mini_waf_waf_http_context_ref_get_protocol(ctx, NULL)),
+             ref_text(mini_waf_waf_http_context_ref_get_method(ctx, NULL)),
+             ref_text(mini_waf_waf_http_context_ref_get_url(ctx, NULL)),
+             ref_text(mini_waf_waf_http_context_ref_get_ip(ctx, NULL)));
+    describe_headers(events->header, sizeof events->header,
+                     mini_waf_waf_http_context_ref_get_headers(ctx));
+    describe_query(events->query, sizeof events->query,
+                   mini_waf_waf_http_context_ref_get_query(ctx));
+    const CookieMap *cookies = mini_waf_waf_http_context_ref_get_cookies(ctx);
+    if (mini_waf_cookie_map_get_at(cookies, 0, &name, &value)) {
+        snprintf(events->cookie, sizeof events->cookie, "%zu:%.*s=%.*s",
+                 mini_waf_cookie_map_len(cookies), (int)name.len, name.data,
+                 (int)value.len, value.data);
+    }
+    if (files > 0) {
+        format_str(events->file, sizeof events->file, file[0].name);
+    }
+    snprintf(events->body, sizeof events->body, "%s",
+             ref_text(mini_waf_waf_http_context_ref_get_raw_body(ctx, NULL)));
+    events->port = mini_waf_waf_http_context_ref_get_local_port(ctx);
+    CHECK(mini_waf_waf_http_context_ref_get_header(ctx, TEXT("x-missing"),
+                                                   NULL) == NULL);
+}
+
+static void on_blocked(void *user_data, const WafHttpContextRef *ctx,
+                       const WafRule *rule) {
+    LogEvents *events = user_data;
+    events->blocked++;
+    CHECK(mini_waf_waf_http_context_ref_is_blocked(ctx));
+    record(events, ctx, rule);
+}
+
+static void on_audit(void *user_data, const WafHttpContextRef *ctx,
+                     const WafRule *rule) {
+    LogEvents *events = user_data;
+    events->audit++;
+    record(events, ctx, rule);
+}
+
+static void on_connection(void *user_data, const WafHttpContextRef *ctx) {
+    LogEvents *events = user_data;
+    size_t len = 0;
+    const char *agent =
+        mini_waf_waf_http_context_ref_get_header(ctx, TEXT("user-agent"), &len);
+    CHECK(agent != NULL && len > 0);
+    events->connection++;
+}
+
+static void on_drop(void *user_data) { ((LogEvents *)user_data)->dropped++; }
+
+/* toy_config with debug logging into `events`. */
+static MiniWafInstance *logged_waf(LogEvents *events) {
+    WafConfig *config = toy_config();
+    WafLogLevel level = WAF_LOG_LEVEL_DEBUG;
+    WafLoggingOptions logging = {&level};
+    mini_waf_waf_config_logging_options(config, logging);
+    WafEngineOptions *options = mini_waf_waf_engine_options_new();
+    WafLogger logger = {events, on_blocked, on_audit, on_connection, on_drop};
+    mini_waf_waf_engine_options_logger(options, logger);
+    MiniWafInstance *waf =
+        mini_waf_create_mini_waf_with_options(config, options);
+    mini_waf_waf_engine_options_free(options);
+    mini_waf_waf_config_free(config);
+    return waf;
+}
+
+static void test_logger_receives_adapter_requests(void) {
+    LogEvents events = {0};
+    MiniWafInstance *waf = logged_waf(&events);
+    CustomAdapter *adapter = toy_adapter();
+    Request request = get("/admin?page=2");
+    request.upload = "avatar.png";
+    Response response = {200, "", ""};
+
+    WafEvaluationResult *result =
+        mini_waf_mini_waf_instance_protect(waf, adapter, &request, &response);
+    CHECK(events.connection == 1);
+    CHECK(events.audit == 1);
+    CHECK(events.blocked == 0);
+    CHECK_STR(events.rule, "audit-admin");
+    CHECK_STR(events.line, "toy-server http GET /admin?page=2 203.0.113.7");
+    CHECK_STR(events.header, "1:user-agent=Mozilla/5.0");
+    CHECK_STR(events.query, "page=2;");
+    CHECK_STR(events.file, "avatar.png");
+    /* The logger lends the same rule as the result and the instance. */
+    size_t count = 0;
+    const WafRule *const *logged =
+        mini_waf_waf_evaluation_result_get_logged_rules(result, &count);
+    CHECK(count == 1 && logged[0] == events.rule_view);
+    mini_waf_waf_evaluation_result_free(result);
+
+    mini_waf_custom_adapter_free(adapter);
+    CHECK(events.dropped == 0);
+    mini_waf_mini_waf_instance_free(waf);
+    CHECK(events.dropped == 1);
+}
+
+static void test_logger_receives_context_requests(void) {
+    LogEvents events = {0};
+    MiniWafInstance *waf = logged_waf(&events);
+    FixedContext state = {0, false};
+    WafHttpContext ctx = fixed_context(&state);
+
+    WafEvaluationResult *result = mini_waf_mini_waf_instance_handle(waf, &ctx);
+    CHECK(state.blocked);
+    CHECK(events.blocked == 1);
+    CHECK(mini_waf_waf_evaluation_result_get_matched_rule(result) != NULL);
+    CHECK_STR(events.rule, matched_id(result));
+    CHECK_STR(events.line, "fixed https POST /api?debug=1 198.51.100.4");
+    CHECK_STR(events.query, "debug=1;filter={status:open};tags=[a,b];");
+    CHECK_STR(events.cookie, "1:session=abc");
+    CHECK_STR(events.body, "name=<script>alert(1)</script>");
+    CHECK(events.port == 443);
+    mini_waf_waf_evaluation_result_free(result);
+    mini_waf_mini_waf_instance_free(waf);
+    CHECK(events.dropped == 1);
+}
+
+static int login_status(const MiniWafInstance *waf,
+                        const CustomAdapter *adapter) {
+    Request request = get("/login");
+    Response response = {200, "", ""};
+    mini_waf_waf_evaluation_result_free(
+        mini_waf_mini_waf_instance_protect(waf, adapter, &request, &response));
+    return response.status;
+}
+
+static void test_instances_share_a_rate_limit_store(void) {
+    CustomAdapter *adapter = toy_adapter();
+    WafConfig *config = toy_config();
+    RateLimitStoreOptions store_options = {NULL, NULL, NULL};
+    RateLimitStore *store = mini_waf_rate_limit_store_new(store_options);
+    WafEngineOptions *options = mini_waf_waf_engine_options_new();
+    mini_waf_waf_engine_options_rate_limit_store(options, store);
+    mini_waf_rate_limit_store_free(store);
+
+    /* A rebuilt instance keeps counting where the old one stopped. */
+    MiniWafInstance *old_waf =
+        mini_waf_create_mini_waf_with_options(config, options);
+    CHECK(login_status(old_waf, adapter) == 200);
+    MiniWafInstance *new_waf =
+        mini_waf_create_mini_waf_with_options(config, options);
+    mini_waf_mini_waf_instance_free(old_waf);
+    CHECK(login_status(new_waf, adapter) == 403);
+
+    /* So does one built on the store of a running instance. */
+    WafEngineOptions *taken = mini_waf_waf_engine_options_new();
+    RateLimitStore *running =
+        mini_waf_mini_waf_instance_rate_limit_store(new_waf);
+    mini_waf_waf_engine_options_rate_limit_store(taken, running);
+    mini_waf_rate_limit_store_free(running);
+    MiniWafInstance *successor =
+        mini_waf_create_mini_waf_with_options(config, taken);
+    CHECK(login_status(successor, adapter) == 403);
+
+    /* Without a shared store, a new instance starts from zero. */
+    MiniWafInstance *fresh =
+        mini_waf_create_mini_waf_with_options(config, NULL);
+    CHECK(login_status(fresh, adapter) == 200);
+
+    mini_waf_mini_waf_instance_free(fresh);
+    mini_waf_mini_waf_instance_free(successor);
+    mini_waf_mini_waf_instance_free(new_waf);
+    mini_waf_waf_engine_options_free(taken);
+    mini_waf_waf_engine_options_free(options);
+    mini_waf_waf_config_free(config);
+    mini_waf_custom_adapter_free(adapter);
 }
 
 static bool is_even_length(void *user_data, const char *value, size_t len) {
@@ -592,6 +889,9 @@ int main(void) {
     test_protect_rate_limits_with_headers();
     test_create_adapter_reports_missing_handlers();
     test_handle_evaluates_a_context();
+    test_logger_receives_adapter_requests();
+    test_logger_receives_context_requests();
+    test_instances_share_a_rate_limit_store();
     test_match_patterns();
     test_fields();
     test_rule_fields();

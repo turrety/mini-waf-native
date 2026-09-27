@@ -9,6 +9,9 @@ internal static partial class Api
 {
     private const string Library = "mini_waf";
 
+    [LibraryImport(Library, EntryPoint = "mini_waf_version")]
+    internal static partial nint Version();
+
     [LibraryImport(Library, EntryPoint = "mini_waf_string_free")]
     internal static partial void StringFree(nint @string);
 
@@ -325,6 +328,9 @@ internal static partial class Api
     [LibraryImport(Library, EntryPoint = "mini_waf_query_map_new")]
     internal static partial nint QueryMapNew();
 
+    [LibraryImport(Library, EntryPoint = "mini_waf_query_map_parse")]
+    internal static partial nint QueryMapParse(nint query, nuint queryLen);
+
     [LibraryImport(Library, EntryPoint = "mini_waf_query_map_insert")]
     internal static partial void QueryMapInsert(
         nint query,
@@ -397,6 +403,73 @@ internal static partial class Api
         nint files,
         nuint count
     );
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_header_map_len")]
+    internal static partial nuint HeaderMapLen(nint headers);
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_header_map_get_at")]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool HeaderMapGetAt(
+        nint headers,
+        nuint index,
+        nint name,
+        nint multi,
+        nint valueCount
+    );
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_header_map_get_value_at")]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool HeaderMapGetValueAt(
+        nint headers,
+        nuint index,
+        nuint valueIndex,
+        nint value
+    );
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_cookie_map_len")]
+    internal static partial nuint CookieMapLen(nint cookies);
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_cookie_map_get_at")]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool CookieMapGetAt(
+        nint cookies,
+        nuint index,
+        nint name,
+        nint value
+    );
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_query_map_len")]
+    internal static partial nuint QueryMapLen(nint query);
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_query_map_get_at")]
+    internal static partial nint QueryMapGetAt(
+        nint query,
+        nuint index,
+        nint key
+    );
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_query_value_kind")]
+    internal static partial int QueryValueKind(nint value);
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_query_value_get_bool")]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool QueryValueGetBool(nint value);
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_query_value_get_number")]
+    internal static partial double QueryValueGetNumber(nint value);
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_query_value_get_string")]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool QueryValueGetString(nint value, nint @out);
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_query_value_array_len")]
+    internal static partial nuint QueryValueArrayLen(nint value);
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_query_value_array_get")]
+    internal static partial nint QueryValueArrayGet(nint value, nuint index);
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_query_value_get_object")]
+    internal static partial nint QueryValueGetObject(nint value);
 
     [LibraryImport(Library, EntryPoint = "mini_waf_normalize_client_ip")]
     internal static partial nint NormalizeClientIp(nint raw, nuint rawLen);
@@ -570,8 +643,145 @@ internal static partial class Api
     [LibraryImport(Library, EntryPoint = "mini_waf_custom_adapter_free")]
     internal static partial void CustomAdapterFree(nint adapter);
 
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_waf_http_context_ref_framework"
+    )]
+    internal static partial nint WafHttpContextRefFramework(nint ctx, nint len);
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_waf_http_context_ref_get_method"
+    )]
+    internal static partial nint WafHttpContextRefGetMethod(nint ctx, nint len);
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_waf_http_context_ref_get_url"
+    )]
+    internal static partial nint WafHttpContextRefGetUrl(nint ctx, nint len);
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_waf_http_context_ref_get_path"
+    )]
+    internal static partial nint WafHttpContextRefGetPath(nint ctx, nint len);
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_waf_http_context_ref_get_ip"
+    )]
+    internal static partial nint WafHttpContextRefGetIp(nint ctx, nint len);
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_waf_http_context_ref_get_protocol"
+    )]
+    internal static partial nint WafHttpContextRefGetProtocol(
+        nint ctx,
+        nint len
+    );
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_waf_http_context_ref_get_local_port"
+    )]
+    internal static partial ushort WafHttpContextRefGetLocalPort(nint ctx);
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_waf_http_context_ref_get_header"
+    )]
+    internal static partial nint WafHttpContextRefGetHeader(
+        nint ctx,
+        nint name,
+        nuint nameLen,
+        nint len
+    );
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_waf_http_context_ref_get_headers"
+    )]
+    internal static partial nint WafHttpContextRefGetHeaders(nint ctx);
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_waf_http_context_ref_get_query"
+    )]
+    internal static partial nint WafHttpContextRefGetQuery(nint ctx);
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_waf_http_context_ref_get_cookies"
+    )]
+    internal static partial nint WafHttpContextRefGetCookies(nint ctx);
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_waf_http_context_ref_get_raw_body"
+    )]
+    internal static partial nint WafHttpContextRefGetRawBody(
+        nint ctx,
+        nint len
+    );
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_waf_http_context_ref_get_files"
+    )]
+    internal static partial nint WafHttpContextRefGetFiles(
+        nint ctx,
+        nint count
+    );
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_waf_http_context_ref_is_blocked"
+    )]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool WafHttpContextRefIsBlocked(nint ctx);
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_rate_limit_store_new")]
+    internal static partial nint RateLimitStoreNew(
+        RateLimitStoreOptionsNative options
+    );
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_rate_limit_store_free")]
+    internal static partial void RateLimitStoreFree(nint store);
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_waf_engine_options_new")]
+    internal static partial nint WafEngineOptionsNew();
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_waf_engine_options_logger")]
+    internal static partial void WafEngineOptionsLogger(
+        nint options,
+        WafLoggerNative logger
+    );
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_waf_engine_options_rate_limit_store"
+    )]
+    internal static partial void WafEngineOptionsRateLimitStore(
+        nint options,
+        nint store
+    );
+
+    [LibraryImport(Library, EntryPoint = "mini_waf_waf_engine_options_free")]
+    internal static partial void WafEngineOptionsFree(nint options);
+
     [LibraryImport(Library, EntryPoint = "mini_waf_create_mini_waf")]
     internal static partial nint CreateMiniWaf(nint config);
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_create_mini_waf_with_options"
+    )]
+    internal static partial nint CreateMiniWafWithOptions(
+        nint config,
+        nint options
+    );
 
     [LibraryImport(Library, EntryPoint = "mini_waf_mini_waf_instance_free")]
     internal static partial void MiniWafInstanceFree(nint instance);
@@ -581,6 +791,12 @@ internal static partial class Api
         nint instance,
         nint count
     );
+
+    [LibraryImport(
+        Library,
+        EntryPoint = "mini_waf_mini_waf_instance_rate_limit_store"
+    )]
+    internal static partial nint MiniWafInstanceRateLimitStore(nint instance);
 
     [LibraryImport(Library, EntryPoint = "mini_waf_mini_waf_instance_handle")]
     internal static partial nint MiniWafInstanceHandle(nint instance, nint ctx);

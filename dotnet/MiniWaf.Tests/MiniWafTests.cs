@@ -92,29 +92,30 @@ public class MiniWafTests
                 }
             );
 
-    private static MiniWafInstance ToyWaf() =>
-        MiniWaf.CreateMiniWaf(
-            new WafConfig()
-                .Presets(WafPresetName.Default)
-                .Level(ProtectionLevel.Balanced)
-                .Rules(
-                    new WafRule(
-                        "audit-admin",
-                        new FieldCondition(WafField.Path).Equals("/admin"),
-                        WafAction.Log
+    private static WafConfig ToyConfig() =>
+        new WafConfig()
+            .Presets(WafPresetName.Default)
+            .Level(ProtectionLevel.Balanced)
+            .Rules(
+                new WafRule(
+                    "audit-admin",
+                    new FieldCondition(WafField.Path).Equals("/admin"),
+                    WafAction.Log
+                ),
+                new WafRule(
+                    "login-rate-limit",
+                    WafCondition.All(
+                        new FieldCondition(WafField.Path).Equals("/login"),
+                        new FieldCondition(WafField.Ip).RateLimit(
+                            new RateLimitSpec(1, 60_000)
+                        )
                     ),
-                    new WafRule(
-                        "login-rate-limit",
-                        WafCondition.All(
-                            new FieldCondition(WafField.Path).Equals("/login"),
-                            new FieldCondition(WafField.Ip).RateLimit(
-                                new RateLimitSpec(1, 60_000)
-                            )
-                        ),
-                        WafAction.Block
-                    ).Reason("Too many login attempts")
-                )
-        );
+                    WafAction.Block
+                ).Reason("Too many login attempts")
+            );
+
+    private static MiniWafInstance ToyWaf() =>
+        MiniWaf.CreateMiniWaf(ToyConfig());
 
     [Fact]
     public void ProtectBlocksAttacks()
@@ -337,6 +338,192 @@ public class MiniWafTests
         Assert.Equal(WafDecision.Block, result.Decision);
         Assert.True(ctx.Blocked);
         Assert.Equal((ushort)403, ctx.Status);
+    }
+
+    /// <summary>A WafLogger that writes down what it sees.</summary>
+    private sealed class RecordingLogger : WafLogger
+    {
+        public List<string> Events = [];
+        public string Line = "";
+        public string Headers = "";
+        public string Query = "";
+        public string Cookies = "";
+        public string Files = "";
+        public string Body = "";
+        public ushort Port;
+        public WafRule? Rule;
+
+        public void Blocked(WafHttpContext ctx, WafRule rule) =>
+            Record($"blocked {rule.Id()}", ctx, rule);
+
+        public void Audit(WafHttpContext ctx, WafRule rule) =>
+            Record($"audit {rule.Id()}", ctx, rule);
+
+        public void Connection(WafHttpContext ctx) =>
+            Events.Add($"connection {ctx.GetHeader("user-agent") ?? "-"}");
+
+        private void Record(string evt, WafHttpContext ctx, WafRule rule)
+        {
+            Events.Add(evt);
+            Rule = rule;
+            Line = string.Join(
+                " ",
+                ctx.Framework(),
+                ctx.GetProtocol(),
+                ctx.GetMethod(),
+                ctx.GetUrl(),
+                ctx.GetIp()
+            );
+            Headers = string.Join(
+                ";",
+                ctx.GetHeaders()
+                    .Select(entry =>
+                        entry.Value is HeaderValue.Single single
+                            ? $"{entry.Key}={single.Value}"
+                            : $"{entry.Key}=[]"
+                    )
+            );
+            Query = Describe(ctx.GetQuery());
+            Cookies = string.Join(
+                ";",
+                ctx.GetCookies().Select(entry => $"{entry.Key}={entry.Value}")
+            );
+            Files = string.Join(";", ctx.GetFiles().Select(file => file.Name));
+            Body = ctx.GetRawBody();
+            Port = ctx.GetLocalPort();
+        }
+    }
+
+    private static string Describe(QueryMap map) =>
+        "{"
+        + string.Join(
+            ",",
+            map.Select(entry => $"{entry.Key}:{Describe(entry.Value)}")
+        )
+        + "}";
+
+    private static string Describe(QueryValue value) =>
+        value switch
+        {
+            QueryValue.String text => text.Value,
+            QueryValue.Number number => number.Value.ToString(
+                System.Globalization.CultureInfo.InvariantCulture
+            ),
+            QueryValue.Bool flag => flag.Value ? "true" : "false",
+            QueryValue.Array array => "["
+                + string.Join(",", array.Values.Select(Describe))
+                + "]",
+            QueryValue.Object obj => Describe(obj.Map),
+            _ => "null",
+        };
+
+    private static MiniWafInstance DebugWaf(WafLogger logger) =>
+        MiniWaf.CreateMiniWaf(
+            ToyConfig().Logging(new WafLoggingOptions(WafLogLevel.Debug)),
+            new WafEngineOptions(Logger: logger)
+        );
+
+    [Fact]
+    public void LoggerReceivesAdapterRequests()
+    {
+        RecordingLogger logger = new();
+        using MiniWafInstance waf = DebugWaf(logger);
+        using var adapter = MiniWaf.CreateAdapter(ToyHandlers());
+        WafEvaluationResult result = waf.Protect(
+            adapter,
+            new Request("/admin?page=2") { Uploads = ["avatar.png"] },
+            new Response()
+        );
+        Assert.Equal(
+            ["audit audit-admin", "connection Mozilla/5.0"],
+            logger.Events
+        );
+        Assert.Equal(
+            "toy-server http GET /admin?page=2 203.0.113.7",
+            logger.Line
+        );
+        Assert.Equal("user-agent=Mozilla/5.0", logger.Headers);
+        Assert.Equal("{page:2}", logger.Query);
+        Assert.Equal("avatar.png", logger.Files);
+        Assert.Equal(result.LoggedRules[0].Id(), logger.Rule?.Id());
+    }
+
+    [Fact]
+    public void LoggerReceivesContextRequests()
+    {
+        RecordingLogger logger = new();
+        using MiniWafInstance waf = DebugWaf(logger);
+        WafEvaluationResult result = waf.Handle(new FixedContext());
+        Assert.Equal(WafDecision.Block, result.Decision);
+        Assert.Equal($"blocked {result.MatchedRule?.Id()}", logger.Events[0]);
+        Assert.Equal("fixed https POST /api?debug=1 198.51.100.4", logger.Line);
+        Assert.Equal(Describe(new FixedContext().GetQuery()), logger.Query);
+        Assert.Equal("session=abc", logger.Cookies);
+        Assert.Equal("name=Ada", logger.Body);
+        Assert.Equal(443, logger.Port);
+    }
+
+    private sealed class Meddler : WafLogger
+    {
+        public void Blocked(WafHttpContext ctx, WafRule rule) =>
+            ctx.Drop(500, "changed");
+
+        public void Audit(WafHttpContext ctx, WafRule rule) =>
+            throw new InvalidOperationException("logger failed");
+
+        public void Connection(WafHttpContext ctx) { }
+    }
+
+    [Fact]
+    public void LoggerRequestIsReadOnlyAndErrorsSurface()
+    {
+        using MiniWafInstance waf = DebugWaf(new Meddler());
+        Assert.Throws<NotSupportedException>(() =>
+            waf.Handle(new FixedContext())
+        );
+
+        using var adapter = MiniWaf.CreateAdapter(ToyHandlers());
+        InvalidOperationException error =
+            Assert.Throws<InvalidOperationException>(() =>
+                waf.Protect(adapter, new Request("/admin"), new Response())
+            );
+        Assert.Equal("logger failed", error.Message);
+    }
+
+    private static int LoginStatus(MiniWafInstance waf)
+    {
+        using var adapter = MiniWaf.CreateAdapter(ToyHandlers());
+        Response response = new();
+        waf.Protect(adapter, new Request("/login"), response);
+        return response.Status;
+    }
+
+    [Fact]
+    public void InstancesShareARateLimitStore()
+    {
+        WafEngineOptions options = new(
+            RateLimitStore: new RateLimitStore(new RateLimitStoreOptions(100))
+        );
+        using MiniWafInstance oldWaf = MiniWaf.CreateMiniWaf(
+            ToyConfig(),
+            options
+        );
+        Assert.Equal(200, LoginStatus(oldWaf));
+
+        using MiniWafInstance newWaf = MiniWaf.CreateMiniWaf(
+            ToyConfig(),
+            options
+        );
+        Assert.Equal(403, LoginStatus(newWaf));
+
+        using MiniWafInstance successor = MiniWaf.CreateMiniWaf(
+            ToyConfig(),
+            new WafEngineOptions(RateLimitStore: oldWaf.RateLimitStore())
+        );
+        Assert.Equal(403, LoginStatus(successor));
+
+        using MiniWafInstance fresh = ToyWaf();
+        Assert.Equal(200, LoginStatus(fresh));
     }
 
     [Fact]

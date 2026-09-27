@@ -6,9 +6,11 @@ import static io.github.murylloex.miniwaf.Native.DECODE_CONFIG;
 import static io.github.murylloex.miniwaf.Native.ENUM;
 import static io.github.murylloex.miniwaf.Native.F64;
 import static io.github.murylloex.miniwaf.Native.I64;
+import static io.github.murylloex.miniwaf.Native.LOGGER;
 import static io.github.murylloex.miniwaf.Native.LOGGING_OPTIONS;
 import static io.github.murylloex.miniwaf.Native.POINTER;
 import static io.github.murylloex.miniwaf.Native.RATE_LIMIT_SPEC;
+import static io.github.murylloex.miniwaf.Native.RATE_LIMIT_STORE_OPTIONS;
 import static io.github.murylloex.miniwaf.Native.SIZE;
 import static io.github.murylloex.miniwaf.Native.U16;
 import static io.github.murylloex.miniwaf.Native.function;
@@ -27,6 +29,19 @@ import java.lang.invoke.MethodHandle;
 final class Api {
 
     private Api() {}
+
+    private static final MethodHandle VERSION = function(
+        "mini_waf_version",
+        returns(POINTER)
+    );
+
+    static MemorySegment version() {
+        try {
+            return (MemorySegment) VERSION.invokeExact();
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
 
     private static final MethodHandle STRING_FREE = function(
         "mini_waf_string_free",
@@ -976,6 +991,19 @@ final class Api {
         }
     }
 
+    private static final MethodHandle QUERY_MAP_PARSE = function(
+        "mini_waf_query_map_parse",
+        returns(POINTER, POINTER, SIZE)
+    );
+
+    static MemorySegment queryMapParse(MemorySegment query, long queryLen) {
+        try {
+            return (MemorySegment) QUERY_MAP_PARSE.invokeExact(query, queryLen);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
     private static final MethodHandle QUERY_MAP_INSERT = function(
         "mini_waf_query_map_insert",
         returnsVoid(POINTER, POINTER, SIZE, POINTER)
@@ -1197,6 +1225,231 @@ final class Api {
                 files,
                 count
             );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle HEADER_MAP_LEN = function(
+        "mini_waf_header_map_len",
+        returns(SIZE, POINTER)
+    );
+
+    static long headerMapLen(MemorySegment headers) {
+        try {
+            return (long) HEADER_MAP_LEN.invokeExact(headers);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle HEADER_MAP_GET_AT = function(
+        "mini_waf_header_map_get_at",
+        returns(BOOL, POINTER, SIZE, POINTER, POINTER, POINTER)
+    );
+
+    static boolean headerMapGetAt(
+        MemorySegment headers,
+        long index,
+        MemorySegment name,
+        MemorySegment multi,
+        MemorySegment valueCount
+    ) {
+        try {
+            return (boolean) HEADER_MAP_GET_AT.invokeExact(
+                headers,
+                index,
+                name,
+                multi,
+                valueCount
+            );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle HEADER_MAP_GET_VALUE_AT = function(
+        "mini_waf_header_map_get_value_at",
+        returns(BOOL, POINTER, SIZE, SIZE, POINTER)
+    );
+
+    static boolean headerMapGetValueAt(
+        MemorySegment headers,
+        long index,
+        long valueIndex,
+        MemorySegment value
+    ) {
+        try {
+            return (boolean) HEADER_MAP_GET_VALUE_AT.invokeExact(
+                headers,
+                index,
+                valueIndex,
+                value
+            );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle COOKIE_MAP_LEN = function(
+        "mini_waf_cookie_map_len",
+        returns(SIZE, POINTER)
+    );
+
+    static long cookieMapLen(MemorySegment cookies) {
+        try {
+            return (long) COOKIE_MAP_LEN.invokeExact(cookies);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle COOKIE_MAP_GET_AT = function(
+        "mini_waf_cookie_map_get_at",
+        returns(BOOL, POINTER, SIZE, POINTER, POINTER)
+    );
+
+    static boolean cookieMapGetAt(
+        MemorySegment cookies,
+        long index,
+        MemorySegment name,
+        MemorySegment value
+    ) {
+        try {
+            return (boolean) COOKIE_MAP_GET_AT.invokeExact(
+                cookies,
+                index,
+                name,
+                value
+            );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle QUERY_MAP_LEN = function(
+        "mini_waf_query_map_len",
+        returns(SIZE, POINTER)
+    );
+
+    static long queryMapLen(MemorySegment query) {
+        try {
+            return (long) QUERY_MAP_LEN.invokeExact(query);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle QUERY_MAP_GET_AT = function(
+        "mini_waf_query_map_get_at",
+        returns(POINTER, POINTER, SIZE, POINTER)
+    );
+
+    static MemorySegment queryMapGetAt(
+        MemorySegment query,
+        long index,
+        MemorySegment key
+    ) {
+        try {
+            return (MemorySegment) QUERY_MAP_GET_AT.invokeExact(
+                query,
+                index,
+                key
+            );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle QUERY_VALUE_KIND = function(
+        "mini_waf_query_value_kind",
+        returns(ENUM, POINTER)
+    );
+
+    static int queryValueKind(MemorySegment value) {
+        try {
+            return (int) QUERY_VALUE_KIND.invokeExact(value);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle QUERY_VALUE_GET_BOOL = function(
+        "mini_waf_query_value_get_bool",
+        returns(BOOL, POINTER)
+    );
+
+    static boolean queryValueGetBool(MemorySegment value) {
+        try {
+            return (boolean) QUERY_VALUE_GET_BOOL.invokeExact(value);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle QUERY_VALUE_GET_NUMBER = function(
+        "mini_waf_query_value_get_number",
+        returns(F64, POINTER)
+    );
+
+    static double queryValueGetNumber(MemorySegment value) {
+        try {
+            return (double) QUERY_VALUE_GET_NUMBER.invokeExact(value);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle QUERY_VALUE_GET_STRING = function(
+        "mini_waf_query_value_get_string",
+        returns(BOOL, POINTER, POINTER)
+    );
+
+    static boolean queryValueGetString(MemorySegment value, MemorySegment out) {
+        try {
+            return (boolean) QUERY_VALUE_GET_STRING.invokeExact(value, out);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle QUERY_VALUE_ARRAY_LEN = function(
+        "mini_waf_query_value_array_len",
+        returns(SIZE, POINTER)
+    );
+
+    static long queryValueArrayLen(MemorySegment value) {
+        try {
+            return (long) QUERY_VALUE_ARRAY_LEN.invokeExact(value);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle QUERY_VALUE_ARRAY_GET = function(
+        "mini_waf_query_value_array_get",
+        returns(POINTER, POINTER, SIZE)
+    );
+
+    static MemorySegment queryValueArrayGet(MemorySegment value, long index) {
+        try {
+            return (MemorySegment) QUERY_VALUE_ARRAY_GET.invokeExact(
+                value,
+                index
+            );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle QUERY_VALUE_GET_OBJECT = function(
+        "mini_waf_query_value_get_object",
+        returns(POINTER, POINTER)
+    );
+
+    static MemorySegment queryValueGetObject(MemorySegment value) {
+        try {
+            return (MemorySegment) QUERY_VALUE_GET_OBJECT.invokeExact(value);
         } catch (Throwable failure) {
             throw rethrow(failure);
         }
@@ -1576,6 +1829,341 @@ final class Api {
         }
     }
 
+    private static final MethodHandle WAF_HTTP_CONTEXT_REF_FRAMEWORK = function(
+        "mini_waf_waf_http_context_ref_framework",
+        returns(POINTER, POINTER, POINTER)
+    );
+
+    static MemorySegment wafHttpContextRefFramework(
+        MemorySegment ctx,
+        MemorySegment len
+    ) {
+        try {
+            return (MemorySegment) WAF_HTTP_CONTEXT_REF_FRAMEWORK.invokeExact(
+                ctx,
+                len
+            );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_HTTP_CONTEXT_REF_GET_METHOD =
+        function(
+            "mini_waf_waf_http_context_ref_get_method",
+            returns(POINTER, POINTER, POINTER)
+        );
+
+    static MemorySegment wafHttpContextRefGetMethod(
+        MemorySegment ctx,
+        MemorySegment len
+    ) {
+        try {
+            return (MemorySegment) WAF_HTTP_CONTEXT_REF_GET_METHOD.invokeExact(
+                ctx,
+                len
+            );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_HTTP_CONTEXT_REF_GET_URL = function(
+        "mini_waf_waf_http_context_ref_get_url",
+        returns(POINTER, POINTER, POINTER)
+    );
+
+    static MemorySegment wafHttpContextRefGetUrl(
+        MemorySegment ctx,
+        MemorySegment len
+    ) {
+        try {
+            return (MemorySegment) WAF_HTTP_CONTEXT_REF_GET_URL.invokeExact(
+                ctx,
+                len
+            );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_HTTP_CONTEXT_REF_GET_PATH = function(
+        "mini_waf_waf_http_context_ref_get_path",
+        returns(POINTER, POINTER, POINTER)
+    );
+
+    static MemorySegment wafHttpContextRefGetPath(
+        MemorySegment ctx,
+        MemorySegment len
+    ) {
+        try {
+            return (MemorySegment) WAF_HTTP_CONTEXT_REF_GET_PATH.invokeExact(
+                ctx,
+                len
+            );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_HTTP_CONTEXT_REF_GET_IP = function(
+        "mini_waf_waf_http_context_ref_get_ip",
+        returns(POINTER, POINTER, POINTER)
+    );
+
+    static MemorySegment wafHttpContextRefGetIp(
+        MemorySegment ctx,
+        MemorySegment len
+    ) {
+        try {
+            return (MemorySegment) WAF_HTTP_CONTEXT_REF_GET_IP.invokeExact(
+                ctx,
+                len
+            );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_HTTP_CONTEXT_REF_GET_PROTOCOL =
+        function(
+            "mini_waf_waf_http_context_ref_get_protocol",
+            returns(POINTER, POINTER, POINTER)
+        );
+
+    static MemorySegment wafHttpContextRefGetProtocol(
+        MemorySegment ctx,
+        MemorySegment len
+    ) {
+        try {
+            MethodHandle handle = WAF_HTTP_CONTEXT_REF_GET_PROTOCOL;
+            return (MemorySegment) handle.invokeExact(ctx, len);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_HTTP_CONTEXT_REF_GET_LOCAL_PORT =
+        function(
+            "mini_waf_waf_http_context_ref_get_local_port",
+            returns(U16, POINTER)
+        );
+
+    static short wafHttpContextRefGetLocalPort(MemorySegment ctx) {
+        try {
+            return (short) WAF_HTTP_CONTEXT_REF_GET_LOCAL_PORT.invokeExact(ctx);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_HTTP_CONTEXT_REF_GET_HEADER =
+        function(
+            "mini_waf_waf_http_context_ref_get_header",
+            returns(POINTER, POINTER, POINTER, SIZE, POINTER)
+        );
+
+    static MemorySegment wafHttpContextRefGetHeader(
+        MemorySegment ctx,
+        MemorySegment name,
+        long nameLen,
+        MemorySegment len
+    ) {
+        try {
+            return (MemorySegment) WAF_HTTP_CONTEXT_REF_GET_HEADER.invokeExact(
+                ctx,
+                name,
+                nameLen,
+                len
+            );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_HTTP_CONTEXT_REF_GET_HEADERS =
+        function(
+            "mini_waf_waf_http_context_ref_get_headers",
+            returns(POINTER, POINTER)
+        );
+
+    static MemorySegment wafHttpContextRefGetHeaders(MemorySegment ctx) {
+        try {
+            return (MemorySegment) WAF_HTTP_CONTEXT_REF_GET_HEADERS.invokeExact(
+                ctx
+            );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_HTTP_CONTEXT_REF_GET_QUERY = function(
+        "mini_waf_waf_http_context_ref_get_query",
+        returns(POINTER, POINTER)
+    );
+
+    static MemorySegment wafHttpContextRefGetQuery(MemorySegment ctx) {
+        try {
+            return (MemorySegment) WAF_HTTP_CONTEXT_REF_GET_QUERY.invokeExact(
+                ctx
+            );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_HTTP_CONTEXT_REF_GET_COOKIES =
+        function(
+            "mini_waf_waf_http_context_ref_get_cookies",
+            returns(POINTER, POINTER)
+        );
+
+    static MemorySegment wafHttpContextRefGetCookies(MemorySegment ctx) {
+        try {
+            return (MemorySegment) WAF_HTTP_CONTEXT_REF_GET_COOKIES.invokeExact(
+                ctx
+            );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_HTTP_CONTEXT_REF_GET_RAW_BODY =
+        function(
+            "mini_waf_waf_http_context_ref_get_raw_body",
+            returns(POINTER, POINTER, POINTER)
+        );
+
+    static MemorySegment wafHttpContextRefGetRawBody(
+        MemorySegment ctx,
+        MemorySegment len
+    ) {
+        try {
+            MethodHandle handle = WAF_HTTP_CONTEXT_REF_GET_RAW_BODY;
+            return (MemorySegment) handle.invokeExact(ctx, len);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_HTTP_CONTEXT_REF_GET_FILES = function(
+        "mini_waf_waf_http_context_ref_get_files",
+        returns(POINTER, POINTER, POINTER)
+    );
+
+    static MemorySegment wafHttpContextRefGetFiles(
+        MemorySegment ctx,
+        MemorySegment count
+    ) {
+        try {
+            return (MemorySegment) WAF_HTTP_CONTEXT_REF_GET_FILES.invokeExact(
+                ctx,
+                count
+            );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_HTTP_CONTEXT_REF_IS_BLOCKED =
+        function(
+            "mini_waf_waf_http_context_ref_is_blocked",
+            returns(BOOL, POINTER)
+        );
+
+    static boolean wafHttpContextRefIsBlocked(MemorySegment ctx) {
+        try {
+            return (boolean) WAF_HTTP_CONTEXT_REF_IS_BLOCKED.invokeExact(ctx);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle RATE_LIMIT_STORE_NEW = function(
+        "mini_waf_rate_limit_store_new",
+        returns(POINTER, RATE_LIMIT_STORE_OPTIONS)
+    );
+
+    static MemorySegment rateLimitStoreNew(MemorySegment options) {
+        try {
+            return (MemorySegment) RATE_LIMIT_STORE_NEW.invokeExact(options);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle RATE_LIMIT_STORE_FREE = function(
+        "mini_waf_rate_limit_store_free",
+        returnsVoid(POINTER)
+    );
+
+    static void rateLimitStoreFree(MemorySegment store) {
+        try {
+            RATE_LIMIT_STORE_FREE.invokeExact(store);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_ENGINE_OPTIONS_NEW = function(
+        "mini_waf_waf_engine_options_new",
+        returns(POINTER)
+    );
+
+    static MemorySegment wafEngineOptionsNew() {
+        try {
+            return (MemorySegment) WAF_ENGINE_OPTIONS_NEW.invokeExact();
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_ENGINE_OPTIONS_LOGGER = function(
+        "mini_waf_waf_engine_options_logger",
+        returnsVoid(POINTER, LOGGER)
+    );
+
+    static void wafEngineOptionsLogger(
+        MemorySegment options,
+        MemorySegment logger
+    ) {
+        try {
+            WAF_ENGINE_OPTIONS_LOGGER.invokeExact(options, logger);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_ENGINE_OPTIONS_RATE_LIMIT_STORE =
+        function(
+            "mini_waf_waf_engine_options_rate_limit_store",
+            returnsVoid(POINTER, POINTER)
+        );
+
+    static void wafEngineOptionsRateLimitStore(
+        MemorySegment options,
+        MemorySegment store
+    ) {
+        try {
+            WAF_ENGINE_OPTIONS_RATE_LIMIT_STORE.invokeExact(options, store);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle WAF_ENGINE_OPTIONS_FREE = function(
+        "mini_waf_waf_engine_options_free",
+        returnsVoid(POINTER)
+    );
+
+    static void wafEngineOptionsFree(MemorySegment options) {
+        try {
+            WAF_ENGINE_OPTIONS_FREE.invokeExact(options);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
     private static final MethodHandle CREATE_MINI_WAF = function(
         "mini_waf_create_mini_waf",
         returns(POINTER, POINTER)
@@ -1584,6 +2172,25 @@ final class Api {
     static MemorySegment createMiniWaf(MemorySegment config) {
         try {
             return (MemorySegment) CREATE_MINI_WAF.invokeExact(config);
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle CREATE_MINI_WAF_WITH_OPTIONS = function(
+        "mini_waf_create_mini_waf_with_options",
+        returns(POINTER, POINTER, POINTER)
+    );
+
+    static MemorySegment createMiniWafWithOptions(
+        MemorySegment config,
+        MemorySegment options
+    ) {
+        try {
+            return (MemorySegment) CREATE_MINI_WAF_WITH_OPTIONS.invokeExact(
+                config,
+                options
+            );
         } catch (Throwable failure) {
             throw rethrow(failure);
         }
@@ -1616,6 +2223,21 @@ final class Api {
                 instance,
                 count
             );
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+
+    private static final MethodHandle MINI_WAF_INSTANCE_RATE_LIMIT_STORE =
+        function(
+            "mini_waf_mini_waf_instance_rate_limit_store",
+            returns(POINTER, POINTER)
+        );
+
+    static MemorySegment miniWafInstanceRateLimitStore(MemorySegment instance) {
+        try {
+            MethodHandle handle = MINI_WAF_INSTANCE_RATE_LIMIT_STORE;
+            return (MemorySegment) handle.invokeExact(instance);
         } catch (Throwable failure) {
             throw rethrow(failure);
         }

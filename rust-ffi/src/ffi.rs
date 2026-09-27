@@ -37,6 +37,25 @@ pub struct MiniWafStr {
 }
 
 impl MiniWafStr {
+    /// Borrow `text`: valid while `text` is.
+    pub fn of(text: &str) -> Self {
+        Self {
+            data: text.as_ptr().cast(),
+            len: text.len(),
+        }
+    }
+
+    /// `None` as `data` `NULL`.
+    pub fn of_option(text: Option<&str>) -> Self {
+        text.map_or(
+            Self {
+                data: ptr::null(),
+                len: 0,
+            },
+            Self::of,
+        )
+    }
+
     /// # Safety
     ///
     /// A non-null `data` must point to `len` readable bytes.

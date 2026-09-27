@@ -77,6 +77,21 @@ final class Native {
     static final StructLayout LOGGING_OPTIONS = MemoryLayout.structLayout(
         POINTER.withName("level")
     );
+    /** {@code WafLogger}: the callbacks of a logger sink. */
+    static final StructLayout LOGGER = MemoryLayout.structLayout(
+        POINTER.withName("user_data"),
+        POINTER.withName("blocked"),
+        POINTER.withName("audit"),
+        POINTER.withName("connection"),
+        POINTER.withName("drop")
+    );
+    /** {@code RateLimitStoreOptions}. */
+    static final StructLayout RATE_LIMIT_STORE_OPTIONS =
+        MemoryLayout.structLayout(
+            POINTER.withName("max_keys"),
+            POINTER.withName("idle_ms"),
+            POINTER.withName("prune_every_hits")
+        );
     /** {@code UploadedFile}. */
     static final StructLayout UPLOADED_FILE = MemoryLayout.structLayout(
         STR.withName("fieldname"),
@@ -265,6 +280,11 @@ final class Native {
         MemorySegment bytes = text(arena, value);
         str.set(POINTER, 0, bytes);
         setSize(str, POINTER.byteSize(), length(bytes));
+    }
+
+    /** Read a {@code MiniWafStr}; null when its data is {@code NULL}. */
+    static String readStr(MemorySegment str) {
+        return string(str.get(POINTER, 0), getSize(str, POINTER.byteSize()));
     }
 
     /**

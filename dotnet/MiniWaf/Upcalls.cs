@@ -18,9 +18,15 @@ namespace MurylloEx.MiniWaf;
 internal static unsafe class Upcalls
 {
     /// <summary>One native call in progress on this thread.</summary>
-    internal sealed class Frame(object? target)
+    internal sealed class Frame(object? target, NativeResource? owner = null)
     {
         public object? Target { get; } = target;
+
+        /// <summary>
+        /// The instance evaluating, which lends the rules it reports.
+        /// </summary>
+        public NativeResource? Owner { get; } = owner;
+
         public ExceptionDispatchInfo? Error { get; set; }
     }
 
@@ -66,6 +72,12 @@ internal static unsafe class Upcalls
             frame.Error = ExceptionDispatchInfo.Capture(error);
         }
     }
+
+    /// <summary>
+    /// A view of <paramref name="rule"/>, lent by the instance evaluating.
+    /// </summary>
+    public static WafRule Rule(nint rule) =>
+        WafRule.View(rule, Frames.Peek().Owner!);
 
     /// <summary>
     /// The innermost frame's target, or null once a callback in it has failed.

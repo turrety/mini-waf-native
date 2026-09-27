@@ -24,6 +24,51 @@ public static class MiniWaf
         ));
 
     /// <summary>
+    /// <see cref="CreateMiniWaf(WafConfig)"/> with engine-level injectables,
+    /// such as a logger or a shared rate-limit store.
+    /// </summary>
+    public static MiniWafInstance CreateMiniWaf(
+        WafConfig config,
+        WafEngineOptions options
+    ) =>
+        config.With(nativeConfig =>
+        {
+            nint nativeOptions = Api.WafEngineOptionsNew();
+            try
+            {
+                if (options.Logger is { } logger)
+                {
+                    Api.WafEngineOptionsLogger(
+                        nativeOptions,
+                        Loggers.Register(logger)
+                    );
+                }
+                return new MiniWafInstance(
+                    options.RateLimitStore is { } store
+                        ? store.With(nativeStore =>
+                        {
+                            Api.WafEngineOptionsRateLimitStore(
+                                nativeOptions,
+                                nativeStore
+                            );
+                            return Api.CreateMiniWafWithOptions(
+                                nativeConfig,
+                                nativeOptions
+                            );
+                        })
+                        : Api.CreateMiniWafWithOptions(
+                            nativeConfig,
+                            nativeOptions
+                        )
+                );
+            }
+            finally
+            {
+                Api.WafEngineOptionsFree(nativeOptions);
+            }
+        });
+
+    /// <summary>
     /// Build a WAF adapter for any framework from typed request / response
     /// mappers; throws <see cref="AdapterBuildError"/> listing every missing
     /// required handler.

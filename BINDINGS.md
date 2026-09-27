@@ -106,6 +106,65 @@ using MiniWafInstance waf = MiniWaf.CreateMiniWaf(new WafConfig()
     .Level(ProtectionLevel.Balanced));
 ```
 
+## Logging and rule reloads
+
+Every binding exposes what the Rust `WafEngineOptions` carries, so an
+application can see which rules are active and why a request was
+blocked, log matched requests, and swap in a new rule list without
+losing its rate-limit counters.
+
+- `instance.rules()` lists the active rules, already resolved and sorted.
+  Results carry `matched_rule` (the `block` rule that won, or the `allow`
+  rule that short-circuited), `reason` and `logged_rules`.
+- A `WafLogger` receives `blocked`, `audit` and `connection` events while
+  `WafConfig.logging` is on, filtered by its level. Each event carries the
+  request as a read-only `WafHttpContext` and the rule, both valid only
+  during the call. An exception it throws comes out of `handle` /
+  `protect`.
+- An instance is immutable. To apply new rules, build a new instance and
+  swap the reference. Give both the same `RateLimitStore`, either one
+  created up front or the running instance's `rate_limit_store()`, so the
+  new instance keeps counting where the old one stopped.
+
+```cpp
+class AuditLog : public mini_waf::WafLogger {
+    void blocked(const mini_waf::WafHttpContext& ctx,
+                 const mini_waf::WafRule& rule) override {
+        std::clog << rule.id() << ' ' << ctx.get_method() << ' '
+                  << ctx.get_url() << ' ' << ctx.get_ip() << '\n';
+    }
+    void audit(const mini_waf::WafHttpContext&,
+               const mini_waf::WafRule&) override {}
+    void connection(const mini_waf::WafHttpContext&) override {}
+};
+
+mini_waf::WafEngineOptions options;
+options.logger = std::make_shared<AuditLog>();
+options.rate_limit_store = running.rate_limit_store();
+auto next = mini_waf::create_mini_waf(config, options);
+```
+
+```java
+MiniWafInstance next = MiniWaf.createMiniWaf(
+    config,
+    new WafEngineOptions(running.rateLimitStore(), new AuditLog())
+);
+```
+
+```csharp
+using MiniWafInstance next = MiniWaf.CreateMiniWaf(
+    config,
+    new WafEngineOptions(running.RateLimitStore(), new AuditLog())
+);
+```
+
+In C, the options are a `WafEngineOptions` handle passed to
+`mini_waf_create_mini_waf_with_options`, and the logger is a `WafLogger`
+struct of callbacks. Its callbacks receive a `WafHttpContextRef`, read
+with the `mini_waf_waf_http_context_ref_*` getters. The maps it returns
+are read with `mini_waf_header_map_get_at`, `mini_waf_query_map_get_at`,
+`mini_waf_cookie_map_get_at` and the `mini_waf_query_value_*` readers.
+
 ## Benchmarks
 
 Every binding has an A0–A6 harness that mirrors `examples/bench.rs` and
@@ -119,24 +178,30 @@ goes through `create_adapter` / `protect`: `c/examples/bench.c`,
 
 Rust names are only recased:
 
-| Rust                            | C                                            | C++                           | Java                      | .NET                      |
-| ------------------------------- | -------------------------------------------- | ----------------------------- | ------------------------- | ------------------------- |
-| `create_mini_waf`               | `mini_waf_create_mini_waf`                   | `create_mini_waf`             | `MiniWaf.createMiniWaf`   | `MiniWaf.CreateMiniWaf`   |
-| `MiniWafInstance::protect`      | `mini_waf_mini_waf_instance_protect`         | `MiniWafInstance::protect`    | `protect`                 | `Protect`                 |
-| `WafRule::reason` (builder)     | `mini_waf_waf_rule_reason`                   | `reason`                      | `reason`                  | `Reason`                  |
-| `rule.id` (field)               | `mini_waf_waf_rule_get_id`                   | `id()`                        | `id()`                    | `Id()`                    |
-| `WafField::Ip`                  | `mini_waf_waf_field_from_str("ip")`          | `WafField::Ip()`              | `WafField.IP`             | `WafField.Ip`             |
-| `WafField::Query(name)`         | `mini_waf_waf_field_query`                   | `WafField::query`             | `WafField.query`          | `WafField.QueryParam`     |
-| `FieldCondition::requires`      | `mini_waf_field_condition_requires`          | `requires_any`                | `requires`                | `Requires`                |
-| `WafCondition::Not`             | `mini_waf_waf_condition_not`                 | `WafCondition::not_`          | `WafCondition.not`        | `WafCondition.Not`        |
-| `ProtectionLevel::High`         | `PROTECTION_LEVEL_HIGH`                      | `ProtectionLevel::High`       | `ProtectionLevel.HIGH`    | `ProtectionLevel.High`    |
-| `Result<_, RegexError>`         | `NULL` + `char **error`                      | throws `RegexError`           | throws `RegexError`       | throws `RegexError`       |
+| Rust                          | C                                             | C++                        | Java                    | .NET                    |
+| ----------------------------- | --------------------------------------------- | -------------------------- | ----------------------- | ----------------------- |
+| `create_mini_waf`             | `mini_waf_create_mini_waf`                    | `create_mini_waf`          | `MiniWaf.createMiniWaf` | `MiniWaf.CreateMiniWaf` |
+| `MiniWafInstance::protect`    | `mini_waf_mini_waf_instance_protect`          | `MiniWafInstance::protect` | `protect`               | `Protect`               |
+| `WafRule::reason` (builder)   | `mini_waf_waf_rule_reason`                    | `reason`                   | `reason`                | `Reason`                |
+| `rule.id` (field)             | `mini_waf_waf_rule_get_id`                    | `id()`                     | `id()`                  | `Id()`                  |
+| `WafField::Ip`                | `mini_waf_waf_field_from_str("ip")`           | `WafField::Ip()`           | `WafField.IP`           | `WafField.Ip`           |
+| `WafField::Query(name)`       | `mini_waf_waf_field_query`                    | `WafField::query`          | `WafField.query`        | `WafField.QueryParam`   |
+| `FieldCondition::requires`    | `mini_waf_field_condition_requires`           | `requires_any`             | `requires`              | `Requires`              |
+| `WafCondition::Not`           | `mini_waf_waf_condition_not`                  | `WafCondition::not_`       | `WafCondition.not`      | `WafCondition.Not`      |
+| `ProtectionLevel::High`       | `PROTECTION_LEVEL_HIGH`                       | `ProtectionLevel::High`    | `ProtectionLevel.HIGH`  | `ProtectionLevel.High`  |
+| `Result<_, RegexError>`       | `NULL` + `char **error`                       | throws `RegexError`        | throws `RegexError`     | throws `RegexError`     |
+| `create_mini_waf(c, Some(o))` | `mini_waf_create_mini_waf_with_options`       | `create_mini_waf(c, o)`    | `createMiniWaf(c, o)`   | `CreateMiniWaf(c, o)`   |
+| `engine.rate_limit_store()`   | `mini_waf_mini_waf_instance_rate_limit_store` | `rate_limit_store()`       | `rateLimitStore()`      | `RateLimitStore()`      |
 
 A few names cannot be kept exactly:
 
 - **C**: every function has the `mini_waf_` prefix, followed by the Rust
   path in snake_case. A public field is read through a `_get_<field>`
-  function.
+  function. C has no optional arguments, so `create_mini_waf` with
+  options is `mini_waf_create_mini_waf_with_options`. The
+  `&dyn WafHttpContext` a logger receives is a `WafHttpContextRef`,
+  because `WafHttpContext` is already the struct of callbacks a caller
+  implements.
 - **C++**: `requires` and `not` are keywords, so these methods are
   `requires_any` (the value must contain any of the literals) and
   `not_`. The unit `WafField` variants are static
@@ -166,8 +231,7 @@ A few names cannot be kept exactly:
     exception is rethrown from `handle` / `protect` / `is_match`.
   - A Rust panic is caught at the boundary and reported as a `NULL` result.
 - **Not exposed**:
-  - custom `WafLogger` sinks (logging goes to the console);
-  - `WafEngineOptions` and the engine internals;
+  - the engine internals;
   - `RawBody::Json`;
   - the `WafAdapter` trait.
 

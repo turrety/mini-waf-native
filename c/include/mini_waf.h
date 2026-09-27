@@ -43,8 +43,7 @@
  *   time. Callbacks run on the thread that called handle / protect, before
  *   it returns; predicates run on any evaluating thread.
  *
- * Not available from C: logger sinks (WafLogger), WafEngineOptions (shared
- * rate-limit stores), RawBody::Json, and the engine internals
+ * Not available from C: RawBody::Json and the engine internals
  * (scan_rules, evaluate_condition, the rate-limit and cache primitives).
  */
 
@@ -95,6 +94,16 @@ typedef enum WafLogLevel {
     WAF_LOG_LEVEL_DEBUG
 } WafLogLevel;
 
+/* The variant of a QueryValue. */
+typedef enum QueryValueKind {
+    QUERY_VALUE_KIND_NULL,
+    QUERY_VALUE_KIND_BOOL,
+    QUERY_VALUE_KIND_NUMBER,
+    QUERY_VALUE_KIND_STRING,
+    QUERY_VALUE_KIND_ARRAY,
+    QUERY_VALUE_KIND_OBJECT
+} QueryValueKind;
+
 /* ------------------------------------------------------------------------
  * Opaque handles
  */
@@ -109,6 +118,11 @@ typedef struct MiniWafInstance MiniWafInstance;
 typedef struct WafEvaluationResult WafEvaluationResult;
 typedef struct CustomAdapterHandlers CustomAdapterHandlers;
 typedef struct CustomAdapter CustomAdapter;
+typedef struct WafEngineOptions WafEngineOptions;
+typedef struct RateLimitStore RateLimitStore;
+/* The request of a log event (a borrowed `&dyn WafHttpContext`), valid
+ * until the logger callback returns. */
+typedef struct WafHttpContextRef WafHttpContextRef;
 
 /* Values callbacks fill in. */
 typedef struct MiniWafString MiniWafString;
@@ -157,6 +171,32 @@ typedef struct UploadedFile {
     MiniWafStr filename;
     MiniWafStr originalname;
 } UploadedFile;
+
+/* RateLimitStoreOptions: NULL members take the default. */
+typedef struct RateLimitStoreOptions {
+    const size_t *max_keys;           /* NULL: 10000 */
+    const int64_t *idle_ms;           /* NULL: 120000 */
+    const uint64_t *prune_every_hits; /* NULL: 1024; 0 disables */
+} RateLimitStoreOptions;
+
+/*
+ * WafLogger: the sink of log events, used while config logging is on and
+ * filtered by its level (Error: blocked; Info: + audit; Debug: +
+ * connection). Callbacks run on the evaluating thread, possibly several at
+ * once, before handle / protect returns; a NULL callback skips its event.
+ * `rule` is borrowed from the instance, `ctx` lives until the callback
+ * returns. `drop` (optional) receives `user_data` once no engine uses the
+ * logger.
+ */
+typedef struct WafLogger {
+    void *user_data;
+    void (*blocked)(void *user_data, const WafHttpContextRef *ctx,
+                    const WafRule *rule);
+    void (*audit)(void *user_data, const WafHttpContextRef *ctx,
+                  const WafRule *rule);
+    void (*connection)(void *user_data, const WafHttpContextRef *ctx);
+    void (*drop)(void *user_data);
+} WafLogger;
 
 /* ------------------------------------------------------------------------
  * Library
@@ -421,6 +461,55 @@ void mini_waf_files_bag_fields_insert(FilesBag *bag, const char *fieldname,
                                       size_t fieldname_len,
                                       const UploadedFile *files, size_t count);
 
+/*
+ * Reading the maps of a WafHttpContextRef. Text comes back as a MiniWafStr
+ * borrowed from the map, without a NUL terminator. `*_get_at` return false
+ * (or NULL) past the last entry; entries keep their insertion order.
+ */
+
+size_t mini_waf_header_map_len(const HeaderMap *headers);
+
+/* Entry `index`: its name, whether it is HeaderValue::Multi, and how many
+ * values it holds (1 for HeaderValue::Single). */
+bool mini_waf_header_map_get_at(const HeaderMap *headers, size_t index,
+                                MiniWafStr *name, bool *multi,
+                                size_t *value_count);
+
+bool mini_waf_header_map_get_value_at(const HeaderMap *headers, size_t index,
+                                      size_t value_index, MiniWafStr *value);
+
+size_t mini_waf_cookie_map_len(const CookieMap *cookies);
+
+bool mini_waf_cookie_map_get_at(const CookieMap *cookies, size_t index,
+                                MiniWafStr *name, MiniWafStr *value);
+
+size_t mini_waf_query_map_len(const QueryMap *query);
+
+/* The value of entry `index`, borrowed from the map; its key in `key`. */
+const QueryValue *mini_waf_query_map_get_at(const QueryMap *query, size_t index,
+                                            MiniWafStr *key);
+
+QueryValueKind mini_waf_query_value_kind(const QueryValue *value);
+
+/* QueryValue::Bool; false for other kinds. */
+bool mini_waf_query_value_get_bool(const QueryValue *value);
+
+/* QueryValue::Number; 0 for other kinds. */
+double mini_waf_query_value_get_number(const QueryValue *value);
+
+/* QueryValue::String; false for other kinds. */
+bool mini_waf_query_value_get_string(const QueryValue *value, MiniWafStr *out);
+
+/* QueryValue::Array: its length and items (NULL past the end); 0 / NULL
+ * for other kinds. */
+size_t mini_waf_query_value_array_len(const QueryValue *value);
+
+const QueryValue *mini_waf_query_value_array_get(const QueryValue *value,
+                                                 size_t index);
+
+/* QueryValue::Object; NULL for other kinds. */
+const QueryMap *mini_waf_query_value_get_object(const QueryValue *value);
+
 /* ------------------------------------------------------------------------
  * IP helpers (free the results with mini_waf_string_free)
  */
@@ -553,10 +642,100 @@ CustomAdapter *mini_waf_create_adapter(const CustomAdapterHandlers *handlers,
 void mini_waf_custom_adapter_free(CustomAdapter *adapter);
 
 /* ------------------------------------------------------------------------
+ * WafHttpContextRef: the request a logger callback receives. Text is
+ * NUL-terminated, valid until the callback returns; maps and files are
+ * borrowed for as long.
+ */
+
+const char *
+mini_waf_waf_http_context_ref_framework(const WafHttpContextRef *ctx,
+                                        size_t *len);
+
+const char *
+mini_waf_waf_http_context_ref_get_method(const WafHttpContextRef *ctx,
+                                         size_t *len);
+
+const char *mini_waf_waf_http_context_ref_get_url(const WafHttpContextRef *ctx,
+                                                  size_t *len);
+
+const char *mini_waf_waf_http_context_ref_get_path(const WafHttpContextRef *ctx,
+                                                   size_t *len);
+
+const char *mini_waf_waf_http_context_ref_get_ip(const WafHttpContextRef *ctx,
+                                                 size_t *len);
+
+const char *
+mini_waf_waf_http_context_ref_get_protocol(const WafHttpContextRef *ctx,
+                                           size_t *len);
+
+uint16_t
+mini_waf_waf_http_context_ref_get_local_port(const WafHttpContextRef *ctx);
+
+/* NULL when the header is absent. */
+const char *
+mini_waf_waf_http_context_ref_get_header(const WafHttpContextRef *ctx,
+                                         const char *name, size_t name_len,
+                                         size_t *len);
+
+const HeaderMap *
+mini_waf_waf_http_context_ref_get_headers(const WafHttpContextRef *ctx);
+
+const QueryMap *
+mini_waf_waf_http_context_ref_get_query(const WafHttpContextRef *ctx);
+
+const CookieMap *
+mini_waf_waf_http_context_ref_get_cookies(const WafHttpContextRef *ctx);
+
+const char *
+mini_waf_waf_http_context_ref_get_raw_body(const WafHttpContextRef *ctx,
+                                           size_t *len);
+
+const UploadedFile *
+mini_waf_waf_http_context_ref_get_files(const WafHttpContextRef *ctx,
+                                        size_t *count);
+
+bool mini_waf_waf_http_context_ref_is_blocked(const WafHttpContextRef *ctx);
+
+/* ------------------------------------------------------------------------
+ * RateLimitStore: rate-limit buckets an engine counts in. Pass one to
+ * several instances (WafEngineOptions) so they share counters, such as a
+ * rebuilt instance taking over from the one it replaces.
+ */
+
+RateLimitStore *mini_waf_rate_limit_store_new(RateLimitStoreOptions options);
+
+/* Instances using the store keep it alive; free this reference any time. */
+void mini_waf_rate_limit_store_free(RateLimitStore *store);
+
+/* ------------------------------------------------------------------------
+ * WafEngineOptions: engine-level injectables for
+ * mini_waf_create_mini_waf_with_options
+ */
+
+WafEngineOptions *mini_waf_waf_engine_options_new(void);
+
+/* The logging sink, used while config logging is on (default: console).
+ * The options own `logger` from here on, even if `options` is NULL. */
+void mini_waf_waf_engine_options_logger(WafEngineOptions *options,
+                                        WafLogger logger);
+
+/* A shared store (default: a new one per instance). */
+void mini_waf_waf_engine_options_rate_limit_store(WafEngineOptions *options,
+                                                  const RateLimitStore *store);
+
+void mini_waf_waf_engine_options_free(WafEngineOptions *options);
+
+/* ------------------------------------------------------------------------
  * create_mini_waf / MiniWafInstance
  */
 
 MiniWafInstance *mini_waf_create_mini_waf(const WafConfig *config);
+
+/* create_mini_waf(config, Some(options)); NULL options as
+ * mini_waf_create_mini_waf. */
+MiniWafInstance *
+mini_waf_create_mini_waf_with_options(const WafConfig *config,
+                                      const WafEngineOptions *options);
 
 void mini_waf_mini_waf_instance_free(MiniWafInstance *instance);
 
@@ -564,6 +743,11 @@ void mini_waf_mini_waf_instance_free(MiniWafInstance *instance);
 const WafRule *const *
 mini_waf_mini_waf_instance_rules(const MiniWafInstance *instance,
                                  size_t *count);
+
+/* The store the instance counts in: a new reference, to free with
+ * mini_waf_rate_limit_store_free. */
+RateLimitStore *
+mini_waf_mini_waf_instance_rate_limit_store(const MiniWafInstance *instance);
 
 /* Evaluate a request through its context. NULL if a callback is missing. */
 WafEvaluationResult *

@@ -74,30 +74,32 @@ class MiniWafTest {
     }
 
     static MiniWafInstance toyWaf() {
-        return MiniWaf.createMiniWaf(
-            new WafConfig()
-                .presets(WafPresetName.DEFAULT)
-                .level(ProtectionLevel.BALANCED)
-                .rules(
-                    new WafRule(
-                        "audit-admin",
-                        new FieldCondition(WafField.PATH).equals("/admin"),
-                        WafAction.LOG
+        return MiniWaf.createMiniWaf(toyConfig());
+    }
+
+    static WafConfig toyConfig() {
+        return new WafConfig()
+            .presets(WafPresetName.DEFAULT)
+            .level(ProtectionLevel.BALANCED)
+            .rules(
+                new WafRule(
+                    "audit-admin",
+                    new FieldCondition(WafField.PATH).equals("/admin"),
+                    WafAction.LOG
+                ),
+                new WafRule(
+                    "login-rate-limit",
+                    WafCondition.all(
+                        new FieldCondition(WafField.PATH)
+                            .equals("/login")
+                            .into(),
+                        new FieldCondition(WafField.IP)
+                            .rateLimit(new RateLimitSpec(1, 60_000))
+                            .into()
                     ),
-                    new WafRule(
-                        "login-rate-limit",
-                        WafCondition.all(
-                            new FieldCondition(WafField.PATH)
-                                .equals("/login")
-                                .into(),
-                            new FieldCondition(WafField.IP)
-                                .rateLimit(new RateLimitSpec(1, 60_000))
-                                .into()
-                        ),
-                        WafAction.BLOCK
-                    ).reason("Too many login attempts")
-                )
-        );
+                    WafAction.BLOCK
+                ).reason("Too many login attempts")
+            );
     }
 
     @Test
@@ -377,6 +379,179 @@ class MiniWafTest {
         assertEquals(WafDecision.BLOCK, result.decision());
         assertTrue(ctx.blocked);
         assertEquals(OptionalInt.of(403), ctx.status);
+    }
+
+    /** A WafLogger that writes down what it sees. */
+    static final class RecordingLogger implements WafLogger {
+
+        final List<String> events = new ArrayList<>();
+        String line;
+        HeaderMap headers;
+        QueryMap query;
+        CookieMap cookies;
+        List<UploadedFile> files;
+        String body;
+        int port;
+        WafRule rule;
+
+        @Override
+        public void blocked(WafHttpContext ctx, WafRule rule) {
+            record("blocked " + rule.id(), ctx, rule);
+        }
+
+        @Override
+        public void audit(WafHttpContext ctx, WafRule rule) {
+            record("audit " + rule.id(), ctx, rule);
+        }
+
+        @Override
+        public void connection(WafHttpContext ctx) {
+            events.add("connection " + ctx.getHeader("user-agent").orElse("-"));
+        }
+
+        private void record(String event, WafHttpContext ctx, WafRule rule) {
+            events.add(event);
+            this.rule = rule;
+            line = String.join(
+                " ",
+                ctx.framework(),
+                ctx.getProtocol(),
+                ctx.getMethod(),
+                ctx.getUrl(),
+                ctx.getIp()
+            );
+            headers = ctx.getHeaders();
+            query = ctx.getQuery();
+            cookies = ctx.getCookies();
+            files = ctx.getFiles();
+            body = ctx.getRawBody();
+            port = ctx.getLocalPort();
+        }
+    }
+
+    static MiniWafInstance debugWaf(WafLogger logger) {
+        return MiniWaf.createMiniWaf(
+            toyConfig().logging(new WafLoggingOptions(WafLogLevel.DEBUG)),
+            new WafEngineOptions(null, logger)
+        );
+    }
+
+    @Test
+    void loggerReceivesAdapterRequests() {
+        RecordingLogger logger = new RecordingLogger();
+        MiniWafInstance waf = debugWaf(logger);
+        Request request = new Request("/admin?page=2");
+        request.uploads = List.of("avatar.png");
+        WafEvaluationResult result = waf.protect(
+            MiniWaf.createAdapter(toyHandlers()),
+            request,
+            new Response()
+        );
+        assertEquals(
+            List.of("audit audit-admin", "connection Mozilla/5.0"),
+            logger.events
+        );
+        assertEquals(
+            "toy-server http GET /admin?page=2 203.0.113.7",
+            logger.line
+        );
+        assertEquals(
+            new HeaderMap().insert("user-agent", "Mozilla/5.0"),
+            logger.headers
+        );
+        assertEquals(new QueryMap().insert("page", "2"), logger.query);
+        assertEquals(List.of(UploadedFile.named("avatar.png")), logger.files);
+        assertEquals(result.loggedRules().get(0).id(), logger.rule.id());
+    }
+
+    @Test
+    void loggerReceivesContextRequests() {
+        RecordingLogger logger = new RecordingLogger();
+        MiniWafInstance waf = debugWaf(logger);
+        WafEvaluationResult result = waf.handle(new FixedContext());
+        assertEquals(WafDecision.BLOCK, result.decision());
+        assertEquals(
+            "blocked " + result.matchedRule().orElseThrow().id(),
+            logger.events.get(0)
+        );
+        assertEquals("fixed https POST /api?debug=1 198.51.100.4", logger.line);
+        assertEquals(new FixedContext().getQuery(), logger.query);
+        assertEquals(new FixedContext().getCookies(), logger.cookies);
+        assertEquals("name=Ada", logger.body);
+        assertEquals(443, logger.port);
+    }
+
+    @Test
+    void loggerRequestIsReadOnlyAndErrorsSurface() {
+        MiniWafInstance meddled = debugWaf(new WafLogger() {
+            @Override
+            public void blocked(WafHttpContext ctx, WafRule rule) {
+                ctx.drop(OptionalInt.of(500), Optional.of("changed"));
+            }
+
+            @Override
+            public void audit(WafHttpContext ctx, WafRule rule) {}
+
+            @Override
+            public void connection(WafHttpContext ctx) {}
+        });
+        assertThrows(UnsupportedOperationException.class, () ->
+            meddled.handle(new FixedContext())
+        );
+
+        MiniWafInstance failing = debugWaf(new WafLogger() {
+            @Override
+            public void blocked(WafHttpContext ctx, WafRule rule) {}
+
+            @Override
+            public void audit(WafHttpContext ctx, WafRule rule) {
+                throw new IllegalStateException("logger failed");
+            }
+
+            @Override
+            public void connection(WafHttpContext ctx) {}
+        });
+        IllegalStateException error = assertThrows(
+            IllegalStateException.class,
+            () ->
+                failing.protect(
+                    MiniWaf.createAdapter(toyHandlers()),
+                    new Request("/admin"),
+                    new Response()
+                )
+        );
+        assertEquals("logger failed", error.getMessage());
+    }
+
+    static int loginStatus(MiniWafInstance waf) {
+        Response response = new Response();
+        waf.protect(
+            MiniWaf.createAdapter(toyHandlers()),
+            new Request("/login"),
+            response
+        );
+        return response.status;
+    }
+
+    @Test
+    void instancesShareARateLimitStore() {
+        WafEngineOptions options = new WafEngineOptions(
+            new RateLimitStore(new RateLimitStoreOptions(100L, null, null)),
+            null
+        );
+        MiniWafInstance oldWaf = MiniWaf.createMiniWaf(toyConfig(), options);
+        assertEquals(200, loginStatus(oldWaf));
+
+        MiniWafInstance newWaf = MiniWaf.createMiniWaf(toyConfig(), options);
+        assertEquals(403, loginStatus(newWaf));
+
+        MiniWafInstance successor = MiniWaf.createMiniWaf(
+            toyConfig(),
+            new WafEngineOptions(oldWaf.rateLimitStore(), null)
+        );
+        assertEquals(403, loginStatus(successor));
+
+        assertEquals(200, loginStatus(toyWaf()));
     }
 
     @Test

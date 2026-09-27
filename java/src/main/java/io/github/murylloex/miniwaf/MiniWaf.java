@@ -31,6 +31,43 @@ public final class MiniWaf {
     }
 
     /**
+     * {@link #createMiniWaf(WafConfig)} with engine-level injectables, such
+     * as a logger or a shared rate-limit store.
+     */
+    public static MiniWafInstance createMiniWaf(
+        WafConfig config,
+        WafEngineOptions options
+    ) {
+        return config.with(nativeConfig -> {
+            MemorySegment nativeOptions = Api.wafEngineOptionsNew();
+            try (Arena arena = Arena.ofConfined()) {
+                if (options.logger() != null) {
+                    Api.wafEngineOptionsLogger(
+                        nativeOptions,
+                        Loggers.register(arena, options.logger())
+                    );
+                }
+                RateLimitStore store = options.rateLimitStore();
+                MemorySegment instance = store == null
+                    ? Api.createMiniWafWithOptions(nativeConfig, nativeOptions)
+                    : store.with(nativeStore -> {
+                        Api.wafEngineOptionsRateLimitStore(
+                            nativeOptions,
+                            nativeStore
+                        );
+                        return Api.createMiniWafWithOptions(
+                            nativeConfig,
+                            nativeOptions
+                        );
+                    });
+                return new MiniWafInstance(instance);
+            } finally {
+                Api.wafEngineOptionsFree(nativeOptions);
+            }
+        });
+    }
+
+    /**
      * Build a WAF adapter for any framework from typed request / response
      * mappers; throws {@link AdapterBuildError} listing every missing
      * required handler.

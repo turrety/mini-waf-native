@@ -38,12 +38,24 @@ final class Upcalls {
         final Object target;
         final Object request;
         final Object response;
+        /** The instance evaluating, which lends the rules it reports. */
+        final NativeResource owner;
         Throwable error;
 
         Frame(Object target, Object request, Object response) {
+            this(target, request, response, null);
+        }
+
+        Frame(
+            Object target,
+            Object request,
+            Object response,
+            NativeResource owner
+        ) {
             this.target = target;
             this.request = request;
             this.response = response;
+            this.owner = owner;
         }
     }
 
@@ -86,6 +98,11 @@ final class Upcalls {
         if (frame != null && frame.error == null) {
             frame.error = error;
         }
+    }
+
+    /** A view of {@code rule}, lent by the instance evaluating. */
+    static WafRule rule(MemorySegment rule) {
+        return WafRule.view(rule, FRAMES.get().peek().owner);
     }
 
     /** The innermost frame, or null once a callback in it has failed. */

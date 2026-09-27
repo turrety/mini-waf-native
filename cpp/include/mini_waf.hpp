@@ -15,7 +15,8 @@
 //             .level(mini_waf::ProtectionLevel::Balanced));
 //
 // A MiniWafInstance is thread-safe; share it across request handlers.
-// Handles are move-only except WafRule, whose copies are deep clones.
+// Handles are move-only except WafRule, whose copies are deep clones, and
+// RateLimitStore, whose copies share one store (an Arc in Rust).
 
 #ifndef MINI_WAF_HPP
 #define MINI_WAF_HPP
@@ -128,9 +129,17 @@ struct DecodeConfig {
     std::optional<bool> comments;
 };
 
-// WafLoggingOptions without the sink: events go to the console.
+// WafLoggingOptions without the sink: events go to the console, or to the
+// WafEngineOptions logger.
 struct WafLoggingOptions {
     std::optional<WafLogLevel> level;
+};
+
+// NULL-free RateLimitStoreOptions: unset members take the default.
+struct RateLimitStoreOptions {
+    std::optional<std::size_t> max_keys;
+    std::optional<std::int64_t> idle_ms;
+    std::optional<std::uint64_t> prune_every_hits;
 };
 
 namespace detail {
@@ -1304,6 +1313,290 @@ create_adapter(CustomAdapterHandlers<TRequest, TResponse> handlers) {
     return CustomAdapter<TRequest, TResponse>(std::move(handlers));
 }
 
+// Receives log events while config logging is on, filtered by its level
+// (Error: blocked; Info: + audit; Debug: + connection). Called on the
+// evaluating thread, possibly from several at once, before handle /
+// protect returns; an exception it throws comes out of that call. `ctx` is
+// read-only and, like `rule`, valid only during the call.
+class WafLogger {
+public:
+    virtual ~WafLogger() = default;
+
+    virtual void blocked(const WafHttpContext& ctx, const WafRule& rule) = 0;
+    virtual void audit(const WafHttpContext& ctx, const WafRule& rule) = 0;
+    virtual void connection(const WafHttpContext& ctx) = 0;
+};
+
+// Rate-limit buckets an engine counts in. Give one to several instances
+// (WafEngineOptions) so they share counters, such as a rebuilt instance
+// taking over from the one it replaces.
+class RateLimitStore {
+public:
+    explicit RateLimitStore(const RateLimitStoreOptions& options = {})
+        : RateLimitStore(sys::mini_waf_rate_limit_store_new({
+              options.max_keys ? &*options.max_keys : nullptr,
+              options.idle_ms ? &*options.idle_ms : nullptr,
+              options.prune_every_hits ? &*options.prune_every_hits : nullptr,
+          })) {}
+
+    const sys::RateLimitStore* native() const { return handle_.get(); }
+
+private:
+    friend class MiniWafInstance;
+
+    explicit RateLimitStore(sys::RateLimitStore* handle)
+        : handle_(handle, sys::mini_waf_rate_limit_store_free) {}
+
+    std::shared_ptr<sys::RateLimitStore> handle_;
+};
+
+// Engine-level injectables for create_mini_waf.
+struct WafEngineOptions {
+    // A shared store (default: a new one per instance).
+    std::optional<RateLimitStore> rate_limit_store;
+    // The logging sink while config logging is on (default: the console).
+    std::shared_ptr<WafLogger> logger;
+};
+
+namespace detail {
+
+// The error slot of the evaluation running on this thread, where logger
+// callbacks park their exceptions for handle / protect to rethrow.
+inline std::exception_ptr*& current_error() {
+    thread_local std::exception_ptr* slot = nullptr;
+    return slot;
+}
+
+class ErrorScope {
+public:
+    explicit ErrorScope(std::exception_ptr& error)
+        : previous_(std::exchange(current_error(), &error)) {}
+    ~ErrorScope() { current_error() = previous_; }
+    ErrorScope(const ErrorScope&) = delete;
+    ErrorScope& operator=(const ErrorScope&) = delete;
+
+private:
+    std::exception_ptr* previous_;
+};
+
+inline std::string string(sys::MiniWafStr text) {
+    return string(text.data, text.len);
+}
+
+inline HeaderMap read_headers(const sys::HeaderMap* map) {
+    HeaderMap headers;
+    sys::MiniWafStr name{};
+    bool multi = false;
+    std::size_t count = 0;
+    for (std::size_t index = 0;
+         sys::mini_waf_header_map_get_at(map, index, &name, &multi, &count);
+         index++) {
+        std::vector<std::string> values;
+        for (std::size_t value_index = 0; value_index < count; value_index++) {
+            sys::MiniWafStr value{};
+            sys::mini_waf_header_map_get_value_at(map, index, value_index,
+                                                  &value);
+            values.push_back(string(value));
+        }
+        if (multi) {
+            headers.emplace_back(string(name), std::move(values));
+        } else {
+            headers.emplace_back(string(name), std::move(values.at(0)));
+        }
+    }
+    return headers;
+}
+
+inline QueryMap read_query(const sys::QueryMap* map);
+
+inline QueryValue read_query_value(const sys::QueryValue* value) {
+    switch (sys::mini_waf_query_value_kind(value)) {
+    case sys::QUERY_VALUE_KIND_BOOL:
+        return {sys::mini_waf_query_value_get_bool(value)};
+    case sys::QUERY_VALUE_KIND_NUMBER:
+        return {sys::mini_waf_query_value_get_number(value)};
+    case sys::QUERY_VALUE_KIND_STRING: {
+        sys::MiniWafStr text{};
+        sys::mini_waf_query_value_get_string(value, &text);
+        return {string(text)};
+    }
+    case sys::QUERY_VALUE_KIND_ARRAY: {
+        std::vector<QueryValue> items;
+        for (std::size_t index = 0;
+             index < sys::mini_waf_query_value_array_len(value); index++) {
+            items.push_back(read_query_value(
+                sys::mini_waf_query_value_array_get(value, index)));
+        }
+        return {std::move(items)};
+    }
+    case sys::QUERY_VALUE_KIND_OBJECT:
+        return {read_query(sys::mini_waf_query_value_get_object(value))};
+    default:
+        return {};
+    }
+}
+
+inline QueryMap read_query(const sys::QueryMap* map) {
+    QueryMap query;
+    sys::MiniWafStr key{};
+    for (std::size_t index = 0; index < sys::mini_waf_query_map_len(map);
+         index++) {
+        const sys::QueryValue* value =
+            sys::mini_waf_query_map_get_at(map, index, &key);
+        query.emplace_back(string(key), read_query_value(value));
+    }
+    return query;
+}
+
+inline CookieMap read_cookies(const sys::CookieMap* map) {
+    CookieMap cookies;
+    sys::MiniWafStr name{};
+    sys::MiniWafStr value{};
+    for (std::size_t index = 0;
+         sys::mini_waf_cookie_map_get_at(map, index, &name, &value); index++) {
+        cookies.emplace_back(string(name), string(value));
+    }
+    return cookies;
+}
+
+inline std::optional<std::string> optional_string(sys::MiniWafStr text) {
+    return optional_string(text.data, text.len);
+}
+
+// The request of a log event: a read-only WafHttpContext over the engine's.
+class ContextRef final : public WafHttpContext {
+public:
+    explicit ContextRef(const sys::WafHttpContextRef* ctx) : ctx_(ctx) {}
+
+    std::string framework() const override {
+        return text(sys::mini_waf_waf_http_context_ref_framework);
+    }
+    std::string get_method() const override {
+        return text(sys::mini_waf_waf_http_context_ref_get_method);
+    }
+    std::string get_url() const override {
+        return text(sys::mini_waf_waf_http_context_ref_get_url);
+    }
+    std::string get_path() const override {
+        return text(sys::mini_waf_waf_http_context_ref_get_path);
+    }
+    std::string get_ip() const override {
+        return text(sys::mini_waf_waf_http_context_ref_get_ip);
+    }
+    std::string get_protocol() const override {
+        return text(sys::mini_waf_waf_http_context_ref_get_protocol);
+    }
+    std::uint16_t get_local_port() const override {
+        return sys::mini_waf_waf_http_context_ref_get_local_port(ctx_);
+    }
+    std::optional<std::string>
+    get_header(std::string_view name) const override {
+        std::size_t len = 0;
+        const char* value = sys::mini_waf_waf_http_context_ref_get_header(
+            ctx_, name.data(), name.size(), &len);
+        return optional_string(value, len);
+    }
+    HeaderMap get_headers() const override {
+        return read_headers(
+            sys::mini_waf_waf_http_context_ref_get_headers(ctx_));
+    }
+    QueryMap get_query() const override {
+        return read_query(sys::mini_waf_waf_http_context_ref_get_query(ctx_));
+    }
+    CookieMap get_cookies() const override {
+        return read_cookies(
+            sys::mini_waf_waf_http_context_ref_get_cookies(ctx_));
+    }
+    std::string get_raw_body() const override {
+        return text(sys::mini_waf_waf_http_context_ref_get_raw_body);
+    }
+    std::vector<UploadedFile> get_files() const override {
+        std::size_t count = 0;
+        const sys::UploadedFile* files =
+            sys::mini_waf_waf_http_context_ref_get_files(ctx_, &count);
+        std::vector<UploadedFile> converted;
+        for (std::size_t index = 0; index < count; index++) {
+            converted.push_back({optional_string(files[index].fieldname),
+                                 optional_string(files[index].name),
+                                 optional_string(files[index].filename),
+                                 optional_string(files[index].originalname)});
+        }
+        return converted;
+    }
+    void set_response_header(std::string_view, std::string_view) override {
+        read_only();
+    }
+    void remove_response_header(std::string_view) override { read_only(); }
+    bool is_blocked() const override {
+        return sys::mini_waf_waf_http_context_ref_is_blocked(ctx_);
+    }
+    void drop(std::optional<std::uint16_t>,
+              std::optional<std::string_view>) override {
+        read_only();
+    }
+
+private:
+    using TextGetter = const char* (*)(const sys::WafHttpContextRef*,
+                                       std::size_t*);
+
+    std::string text(TextGetter getter) const {
+        std::size_t len = 0;
+        const char* data = getter(ctx_, &len);
+        return string(data, len);
+    }
+
+    [[noreturn]] static void read_only() {
+        throw std::logic_error("mini-waf: a logged request is read-only");
+    }
+
+    const sys::WafHttpContextRef* ctx_;
+};
+
+// The WafLogger callbacks; `user_data` is a heap std::shared_ptr<WafLogger>.
+struct LoggerTrampolines {
+    using Sink = std::shared_ptr<WafLogger>;
+
+    template <class F>
+    static void run(F&& body) {
+        std::exception_ptr* error = current_error();
+        if (error) {
+            guard(*error, std::forward<F>(body));
+            return;
+        }
+        try {
+            body();
+        } catch (...) {
+            // No evaluation to report to: nothing sane to do but drop it.
+        }
+    }
+
+    static void blocked(void* user_data, const sys::WafHttpContextRef* ctx,
+                        const sys::WafRule* rule) {
+        run([&] {
+            (*static_cast<Sink*>(user_data))
+                ->blocked(ContextRef(ctx), WafRule::borrowed(rule));
+        });
+    }
+
+    static void audit(void* user_data, const sys::WafHttpContextRef* ctx,
+                      const sys::WafRule* rule) {
+        run([&] {
+            (*static_cast<Sink*>(user_data))
+                ->audit(ContextRef(ctx), WafRule::borrowed(rule));
+        });
+    }
+
+    static void connection(void* user_data, const sys::WafHttpContextRef* ctx) {
+        run([&] {
+            (*static_cast<Sink*>(user_data))->connection(ContextRef(ctx));
+        });
+    }
+
+    static void drop(void* user_data) { delete static_cast<Sink*>(user_data); }
+};
+
+}  // namespace detail
+
 // A WAF instance: presets and rules resolved and compiled once. Thread-safe.
 class MiniWafInstance {
 public:
@@ -1320,10 +1613,17 @@ public:
         return views;
     }
 
+    // The store the instance counts in, to share with its successor.
+    RateLimitStore rate_limit_store() const {
+        return RateLimitStore(
+            sys::mini_waf_mini_waf_instance_rate_limit_store(handle_.get()));
+    }
+
     // Evaluate a request through its context. On block, calls ctx.drop()
     // with the configured status and body.
     WafEvaluationResult handle(WafHttpContext& ctx) const {
         detail::ContextFrame frame{&ctx, nullptr};
+        detail::ErrorScope scope(frame.error);
         sys::WafHttpContext table = detail::context_table(&frame);
         return finish(
             sys::mini_waf_mini_waf_instance_handle(handle_.get(), &table),
@@ -1337,13 +1637,15 @@ public:
             const TRequest& request, TResponse& response) const {
         typename CustomAdapter<TRequest, TResponse>::Frame frame{
             adapter.handlers_.get(), &request, &response, nullptr};
+        detail::ErrorScope scope(frame.error);
         return finish(sys::mini_waf_mini_waf_instance_protect(
                           handle_.get(), adapter.native(), &frame, &frame),
                       frame.error);
     }
 
 private:
-    friend MiniWafInstance create_mini_waf(const WafConfig& config);
+    friend MiniWafInstance create_mini_waf(const WafConfig& config,
+                                           const WafEngineOptions& options);
 
     explicit MiniWafInstance(sys::MiniWafInstance* handle) : handle_(handle) {}
 
@@ -1384,9 +1686,28 @@ private:
         handle_;
 };
 
-// Build a WAF instance: the main entry point.
-inline MiniWafInstance create_mini_waf(const WafConfig& config) {
-    return MiniWafInstance(sys::mini_waf_create_mini_waf(config.native()));
+// Build a WAF instance: the main entry point. `options` carries
+// engine-level injectables, such as a logger or a shared rate-limit store.
+inline MiniWafInstance create_mini_waf(const WafConfig& config,
+                                       const WafEngineOptions& options = {}) {
+    detail::Handle<sys::WafEngineOptions, sys::mini_waf_waf_engine_options_free>
+        native(sys::mini_waf_waf_engine_options_new());
+    if (options.logger) {
+        sys::WafLogger logger{
+            new detail::LoggerTrampolines::Sink(options.logger),
+            &detail::LoggerTrampolines::blocked,
+            &detail::LoggerTrampolines::audit,
+            &detail::LoggerTrampolines::connection,
+            &detail::LoggerTrampolines::drop,
+        };
+        sys::mini_waf_waf_engine_options_logger(native.get(), logger);
+    }
+    if (options.rate_limit_store) {
+        sys::mini_waf_waf_engine_options_rate_limit_store(
+            native.get(), options.rate_limit_store->native());
+    }
+    return MiniWafInstance(sys::mini_waf_create_mini_waf_with_options(
+        config.native(), native.get()));
 }
 
 inline std::string normalize_client_ip(std::string_view raw) {

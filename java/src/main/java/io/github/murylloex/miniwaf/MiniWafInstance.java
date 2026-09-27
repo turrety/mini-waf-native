@@ -28,13 +28,20 @@ public final class MiniWafInstance extends NativeResource {
         });
     }
 
+    /** The store the instance counts in, to share with its successor. */
+    public RateLimitStore rateLimitStore() {
+        return with(instance ->
+            new RateLimitStore(Api.miniWafInstanceRateLimitStore(instance))
+        );
+    }
+
     /**
      * Evaluate a request through its context. On block, calls
      * {@link WafHttpContext#drop} with the configured status and body;
      * rate-limited rules also set {@code X-RateLimit-*} response headers.
      */
     public WafEvaluationResult handle(WafHttpContext ctx) {
-        Upcalls.Frame frame = new Upcalls.Frame(ctx, null, null);
+        Upcalls.Frame frame = new Upcalls.Frame(ctx, null, null, this);
         return with(instance ->
             Upcalls.within(frame, () -> {
                 try (Arena arena = Arena.ofConfined()) {
@@ -54,7 +61,8 @@ public final class MiniWafInstance extends NativeResource {
         Upcalls.Frame frame = new Upcalls.Frame(
             adapter.handlers,
             request,
-            response
+            response,
+            this
         );
         return with(instance ->
             adapter.with(nativeAdapter ->

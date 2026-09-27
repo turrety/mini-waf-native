@@ -69,23 +69,86 @@ CustomAdapterHandlers<Request, Response> toy_handlers() {
         });
 }
 
-MiniWafInstance toy_waf() {
+WafConfig toy_config() {
+    return WafConfig()
+        .presets({WafPresetName::Default})
+        .level(ProtectionLevel::Balanced)
+        .rules({
+            WafRule("audit-admin",
+                    FieldCondition(WafField::Path()).equals("/admin"),
+                    WafAction::Log),
+            WafRule("login-rate-limit",
+                    WafCondition::all(
+                        FieldCondition(WafField::Path()).equals("/login"),
+                        FieldCondition(WafField::Ip())
+                            .rate_limit(RateLimitSpec(1, 60000))),
+                    WafAction::Block)
+                .reason("Too many login attempts"),
+        });
+}
+
+MiniWafInstance toy_waf(const WafEngineOptions& options = {}) {
+    return create_mini_waf(toy_config(), options);
+}
+
+// A WafLogger that writes down what it sees.
+class RecordingLogger : public WafLogger {
+public:
+    std::vector<std::string> events;
+    std::string line;
+    HeaderMap headers;
+    QueryMap query;
+    CookieMap cookies;
+    std::vector<UploadedFile> files;
+    std::string body;
+    std::uint16_t port = 0;
+    bool throws = false;
+
+    void blocked(const WafHttpContext& ctx, const WafRule& rule) override {
+        record("blocked " + rule.id(), ctx);
+    }
+    void audit(const WafHttpContext& ctx, const WafRule& rule) override {
+        record("audit " + rule.id(), ctx);
+    }
+    void connection(const WafHttpContext& ctx) override {
+        events.push_back("connection " +
+                         ctx.get_header("user-agent").value_or("-"));
+    }
+
+private:
+    void record(std::string event, const WafHttpContext& ctx) {
+        if (throws) {
+            throw std::runtime_error("logger failed");
+        }
+        events.push_back(std::move(event));
+        line = ctx.framework() + " " + ctx.get_protocol() + " " +
+               ctx.get_method() + " " + ctx.get_url() + " " + ctx.get_ip();
+        headers = ctx.get_headers();
+        query = ctx.get_query();
+        cookies = ctx.get_cookies();
+        files = ctx.get_files();
+        body = ctx.get_raw_body();
+        port = ctx.get_local_port();
+    }
+};
+
+WafEngineOptions logged_by(std::shared_ptr<RecordingLogger> logger) {
+    WafEngineOptions options;
+    options.logger = std::move(logger);
+    return options;
+}
+
+MiniWafInstance debug_waf(const WafEngineOptions& options) {
     return create_mini_waf(
-        WafConfig()
-            .presets({WafPresetName::Default})
-            .level(ProtectionLevel::Balanced)
-            .rules({
-                WafRule("audit-admin",
-                        FieldCondition(WafField::Path()).equals("/admin"),
-                        WafAction::Log),
-                WafRule("login-rate-limit",
-                        WafCondition::all(
-                            FieldCondition(WafField::Path()).equals("/login"),
-                            FieldCondition(WafField::Ip())
-                                .rate_limit(RateLimitSpec(1, 60000))),
-                        WafAction::Block)
-                    .reason("Too many login attempts"),
-            }));
+        toy_config().logging(WafLoggingOptions{WafLogLevel::Debug}), options);
+}
+
+int login_status(const MiniWafInstance& waf) {
+    auto adapter = create_adapter(toy_handlers());
+    Request request = get("/login");
+    Response response;
+    waf.protect(adapter, request, response);
+    return response.status;
 }
 
 // A WafHttpContext over a fixed POST request.
@@ -310,6 +373,131 @@ SCENARIO("handle evaluates a WafHttpContext", "[handle]") {
                 CHECK(ctx.blocked);
                 CHECK(ctx.status == std::optional<std::uint16_t>(403));
             }
+        }
+    }
+}
+
+SCENARIO("a logger receives the requests it logs", "[logger]") {
+    GIVEN("a WAF logging at debug level into a recording logger") {
+        auto logger = std::make_shared<RecordingLogger>();
+        auto waf = debug_waf(logged_by(logger));
+
+        WHEN("an adapter request matches a log rule") {
+            auto adapter = create_adapter(toy_handlers());
+            Request request = get("/admin?page=2");
+            request.uploads = {"avatar.png"};
+            Response response;
+            auto result = waf.protect(adapter, request, response);
+
+            THEN("the logger sees the audit, then the connection") {
+                CHECK(logger->events ==
+                      std::vector<std::string>{"audit audit-admin",
+                                               "connection Mozilla/5.0"});
+                CHECK(logger->line ==
+                      "toy-server http GET /admin?page=2 203.0.113.7");
+                CHECK(logger->headers ==
+                      HeaderMap{{"user-agent", std::string("Mozilla/5.0")}});
+                REQUIRE(logger->query.size() == 1);
+                CHECK(std::get<std::string>(logger->query[0].second.value) ==
+                      "2");
+                REQUIRE(logger->files.size() == 1);
+                CHECK(logger->files[0].name == "avatar.png");
+                CHECK(result.logged_rules.at(0).id() == "audit-admin");
+            }
+        }
+
+        WHEN("a context request is blocked") {
+            FixedContext ctx;
+            auto result = waf.handle(ctx);
+
+            THEN("the logger sees the block and the whole request") {
+                REQUIRE(result.matched_rule);
+                CHECK(logger->events.back() ==
+                      "blocked " + result.matched_rule->id());
+                CHECK(logger->line ==
+                      "fixed https POST /api?debug=1 198.51.100.4");
+                REQUIRE(logger->query.size() == 1);
+                const auto& filter =
+                    std::get<QueryMap>(logger->query[0].second.value);
+                CHECK(filter.at(0).first == "$ne");
+                CHECK(std::get<std::string>(filter.at(0).second.value) ==
+                      "null");
+                CHECK(logger->cookies == CookieMap{{"session", "abc"}});
+                CHECK(logger->body == "name=Ada");
+                CHECK(logger->port == 443);
+            }
+        }
+    }
+}
+
+SCENARIO("a logger's request is read-only and its errors surface", "[logger]") {
+    GIVEN("a logger that tries to change the request") {
+        class Meddler : public WafLogger {
+        public:
+            void blocked(const WafHttpContext& ctx, const WafRule&) override {
+                const_cast<WafHttpContext&>(ctx).drop(500, "changed");
+            }
+            void audit(const WafHttpContext&, const WafRule&) override {}
+            void connection(const WafHttpContext&) override {}
+        };
+        WafEngineOptions options;
+        options.logger = std::make_shared<Meddler>();
+        auto waf = debug_waf(options);
+
+        WHEN("it logs a block") {
+            FixedContext ctx;
+            THEN("handle throws its logic_error") {
+                CHECK_THROWS_AS(waf.handle(ctx), std::logic_error);
+            }
+        }
+    }
+
+    GIVEN("a logger that throws") {
+        auto logger = std::make_shared<RecordingLogger>();
+        logger->throws = true;
+        auto waf = debug_waf(logged_by(logger));
+
+        WHEN("it logs an adapter request") {
+            auto adapter = create_adapter(toy_handlers());
+            Request request = get("/admin");
+            Response response;
+            THEN("protect rethrows the exception") {
+                CHECK_THROWS_AS(waf.protect(adapter, request, response),
+                                std::runtime_error);
+            }
+        }
+    }
+}
+
+SCENARIO("instances share a rate-limit store", "[store]") {
+    GIVEN("a store shared through the engine options") {
+        WafEngineOptions options;
+        options.rate_limit_store = RateLimitStore();
+        auto old_waf = toy_waf(options);
+        CHECK(login_status(old_waf) == 200);
+
+        WHEN("the WAF is rebuilt with the same store") {
+            auto new_waf = toy_waf(options);
+
+            THEN("the new instance keeps counting") {
+                CHECK(login_status(new_waf) == 403);
+            }
+        }
+
+        WHEN("an instance is built on a running instance's store") {
+            WafEngineOptions taken;
+            taken.rate_limit_store = old_waf.rate_limit_store();
+            auto successor = toy_waf(taken);
+
+            THEN("it keeps counting too") {
+                CHECK(login_status(successor) == 403);
+            }
+        }
+
+        WHEN("an instance gets no store") {
+            auto fresh = toy_waf();
+
+            THEN("it starts from zero") { CHECK(login_status(fresh) == 200); }
         }
     }
 }

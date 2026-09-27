@@ -76,6 +76,25 @@ internal struct WafLoggingOptionsNative
     public nint Level;
 }
 
+/// <summary><c>WafLogger</c>: the callbacks of a logger sink.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct WafLoggerNative
+{
+    public nint UserData;
+    public nint Blocked;
+    public nint Audit;
+    public nint Connection;
+    public nint Drop;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct RateLimitStoreOptionsNative
+{
+    public nint MaxKeys;
+    public nint IdleMs;
+    public nint PruneEveryHits;
+}
+
 [StructLayout(LayoutKind.Sequential)]
 internal struct UploadedFileNative
 {

@@ -20,13 +20,21 @@ public sealed class MiniWafInstance : NativeResource
         });
 
     /// <summary>
+    /// The store the instance counts in, to share with its successor.
+    /// </summary>
+    public RateLimitStore RateLimitStore() =>
+        With(instance => new RateLimitStore(
+            Api.MiniWafInstanceRateLimitStore(instance)
+        ));
+
+    /// <summary>
     /// Evaluate a request through its context. On block, calls
     /// <see cref="WafHttpContext.Drop"/> with the configured status and body;
     /// rate-limited rules also set <c>X-RateLimit-*</c> response headers.
     /// </summary>
     public WafEvaluationResult Handle(WafHttpContext ctx)
     {
-        Upcalls.Frame frame = new(ctx);
+        Upcalls.Frame frame = new(ctx, this);
         return With(instance =>
             Upcalls.Within(
                 frame,
@@ -50,7 +58,7 @@ public sealed class MiniWafInstance : NativeResource
         TResponse response
     )
     {
-        Upcalls.Frame frame = new(adapter.Bind(request, response));
+        Upcalls.Frame frame = new(adapter.Bind(request, response), this);
         return With(instance =>
             adapter.With(nativeAdapter =>
                 Upcalls.Within(
