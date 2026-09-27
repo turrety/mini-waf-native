@@ -31,14 +31,22 @@ jobs:
           - windows-11-arm # Windows arm64
           - macos-latest # macOS arm64 (Apple Silicon)
           - macos-15-intel # macOS x64
+        include:
+          - java: "22"
+            distribution: temurin
+          # No vendor ships JDK 22 for Windows on ARM; test there on the
+          # 25 LTS, which runs the same --release 22 bytecode.
+          - os: windows-11-arm
+            java: "25"
+            distribution: zulu
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release -p mini-waf-ffi
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
-          distribution: temurin
-          java-version: "22"
+          distribution: ${{ matrix.distribution }}
+          java-version: ${{ matrix.java }}
       - run: mvn -B test
         working-directory: java
 
@@ -46,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "22"
