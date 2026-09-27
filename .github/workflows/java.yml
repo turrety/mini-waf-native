@@ -1,0 +1,44 @@
+name: Java
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "java/**"
+      - "rust/**"
+      - "rust-ffi/**"
+      - "Cargo.*"
+      - ".github/workflows/java.yml"
+  pull_request:
+    paths:
+      - "java/**"
+      - "rust/**"
+      - "rust-ffi/**"
+      - "Cargo.*"
+      - ".github/workflows/java.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release -p mini-waf-ffi
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "22"
+      - run: mvn -B test
+        working-directory: java
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "22"
+      - name: Checkstyle
+        run: mvn -B checkstyle:check
+        working-directory: java

@@ -1,0 +1,38 @@
+name: C
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "c/**"
+      - "rust/**"
+      - "rust-ffi/**"
+      - "Cargo.*"
+      - ".github/workflows/c.yml"
+  pull_request:
+    paths:
+      - "c/**"
+      - "rust/**"
+      - "rust-ffi/**"
+      - "Cargo.*"
+      - ".github/workflows/c.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release -p mini-waf-ffi
+      - run: cmake -S c -B target/c
+      - run: cmake --build target/c
+      - run: ctest --test-dir target/c --output-on-failure
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: clang-format
+        run: |
+          pipx run clang-format==23.1.1 --dry-run --Werror \
+            $(git ls-files 'c/*.[ch]')

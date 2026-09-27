@@ -1,0 +1,40 @@
+name: C++
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "cpp/**"
+      - "c/include/**"
+      - "rust/**"
+      - "rust-ffi/**"
+      - "Cargo.*"
+      - ".github/workflows/cpp.yml"
+  pull_request:
+    paths:
+      - "cpp/**"
+      - "c/include/**"
+      - "rust/**"
+      - "rust-ffi/**"
+      - "Cargo.*"
+      - ".github/workflows/cpp.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release -p mini-waf-ffi
+      - run: cmake -S cpp -B target/cpp
+      - run: cmake --build target/cpp
+      - run: ctest --test-dir target/cpp --output-on-failure
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: clang-format
+        run: |
+          pipx run clang-format==23.1.1 --dry-run --Werror \
+            $(git ls-files 'cpp/*.[ch]pp')

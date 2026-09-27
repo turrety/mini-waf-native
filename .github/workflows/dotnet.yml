@@ -1,0 +1,44 @@
+name: .NET
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "dotnet/**"
+      - "rust/**"
+      - "rust-ffi/**"
+      - "Cargo.*"
+      - ".github/workflows/dotnet.yml"
+  pull_request:
+    paths:
+      - "dotnet/**"
+      - "rust/**"
+      - "rust-ffi/**"
+      - "Cargo.*"
+      - ".github/workflows/dotnet.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release -p mini-waf-ffi
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - run: dotnet test
+        working-directory: dotnet
+        env:
+          MINI_WAF_LIBRARY_PATH: ${{ github.workspace }}/target/release
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: CSharpier
+        run: dotnet tool restore && dotnet csharpier check .
+        working-directory: dotnet
