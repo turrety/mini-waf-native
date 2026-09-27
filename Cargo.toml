@@ -1,18 +1,3 @@
-[package]
-name = "mini-waf"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.85"
-description = "Minimalistic, framework-agnostic Web Application Firewall engine: declarative rules, OWASP CRS-derived presets, one universal adapter."
-license = "MIT"
-repository = "https://github.com/turrety/mini-waf-native"
-readme = "README.md"
-exclude = ["/bindings"]
-keywords = ["waf", "firewall", "security", "owasp", "http"]
-categories = ["web-programming::http-server", "network-programming"]
-
 [workspace]
-members = ["bindings/ffi"]
-
-[dependencies]
-regex = "1.10"
+resolver = "3"
+members = ["rust", "rust-ffi"]

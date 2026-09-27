@@ -134,7 +134,7 @@ fn run(
     template: &BenchRequest,
     iterations: usize,
 ) {
-    for _ in 0..1_000 {
+    for _ in 0..10_000 {
         black_box(waf.handle(&mut template.clone()).decision);
     }
     let mut samples = Vec::with_capacity(iterations);
@@ -176,7 +176,7 @@ fn main() {
 
     println!(
         concat!(
-            "iterations: {iterations} (+1000 warmup); ",
+            "iterations: {iterations} (+10000 warmup); ",
             "preset-dos-rate-limit disabled on A1–A6\n",
         ),
         iterations = iterations

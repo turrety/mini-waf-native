@@ -1,6 +1,6 @@
 // Protect a (pretend) server's requests with the universal adapter.
 //
-//     MINI_WAF_LIBRARY_PATH=$PWD/../../target/release \
+//     MINI_WAF_LIBRARY_PATH=$PWD/../target/release \
 //         dotnet run --project MiniWaf.Example
 
 using MurylloEx.MiniWaf;

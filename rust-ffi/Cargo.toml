@@ -16,4 +16,4 @@ doc = false
 
 [dependencies]
 # Renamed: this library is itself called `mini_waf`.
-waf = { package = "mini-waf", path = "../.." }
+waf = { package = "mini-waf", path = "../rust" }

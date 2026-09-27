@@ -129,5 +129,5 @@ pub use utils::ip::{
 
 /// Compiles and runs every Rust snippet of the README as a doc test.
 #[cfg(doctest)]
-#[doc = include_str!("../README.md")]
+#[doc = include_str!("../../README.md")]
 pub struct ReadmeDoctests;

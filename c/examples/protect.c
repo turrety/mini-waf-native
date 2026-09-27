@@ -1,7 +1,7 @@
 /*
  * Protect a (pretend) server's requests with the universal adapter.
  *
- *     cmake -S bindings/c -B target/c && cmake --build target/c
+ *     cmake -S c -B target/c && cmake --build target/c
  *     target/c/protect
  */
 

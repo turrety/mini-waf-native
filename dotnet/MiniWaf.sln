@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniWaf.Tests", "MiniWaf.Te
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniWaf.Example", "MiniWaf.Example\MiniWaf.Example.csproj", "{7860F27B-D355-473E-A668-092F96D59AA5}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MiniWaf.Bench", "MiniWaf.Bench\MiniWaf.Bench.csproj", "{1CF54727-FC74-451B-B198-5A640C406480}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,5 +32,9 @@ Global
 		{7860F27B-D355-473E-A668-092F96D59AA5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7860F27B-D355-473E-A668-092F96D59AA5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7860F27B-D355-473E-A668-092F96D59AA5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1CF54727-FC74-451B-B198-5A640C406480}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1CF54727-FC74-451B-B198-5A640C406480}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1CF54727-FC74-451B-B198-5A640C406480}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1CF54727-FC74-451B-B198-5A640C406480}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
