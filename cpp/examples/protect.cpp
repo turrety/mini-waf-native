@@ -1,6 +1,6 @@
 // Protect a (pretend) server's requests with the universal adapter.
 //
-//     cmake -S bindings/cpp -B target/cpp && cmake --build target/cpp
+//     cmake -S cpp -B target/cpp && cmake --build target/cpp
 //     target/cpp/protect
 
 #include <iostream>
