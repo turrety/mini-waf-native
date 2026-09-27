@@ -1,5 +1,0 @@
-{
-  "plugins": ["prettier-plugin-java"],
-  "printWidth": 80,
-  "tabWidth": 4
-}

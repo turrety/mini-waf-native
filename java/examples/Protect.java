@@ -2,7 +2,7 @@
 //
 //     mvn -B -q compile
 //     java --enable-native-access=ALL-UNNAMED -cp target/classes \
-//         -Dmini_waf.library.path=../../target/release examples/Protect.java
+//         -Dmini_waf.library.path=../target/release examples/Protect.java
 
 import io.github.murylloex.miniwaf.CustomAdapter;
 import io.github.murylloex.miniwaf.CustomAdapterHandlers;

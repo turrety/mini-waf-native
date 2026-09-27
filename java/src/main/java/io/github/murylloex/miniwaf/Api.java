@@ -1491,8 +1491,8 @@ final class Api {
         }
     }
 
-    private static final MethodHandle CUSTOM_ADAPTER_HANDLERS_SET_RESPONSE_HEADER =
-        function(
+    private static final MethodHandle
+        CUSTOM_ADAPTER_HANDLERS_SET_RESPONSE_HEADER = function(
             "mini_waf_custom_adapter_handlers_set_response_header",
             returnsVoid(POINTER, POINTER)
         );
@@ -1511,8 +1511,8 @@ final class Api {
         }
     }
 
-    private static final MethodHandle CUSTOM_ADAPTER_HANDLERS_REMOVE_RESPONSE_HEADER =
-        function(
+    private static final MethodHandle
+        CUSTOM_ADAPTER_HANDLERS_REMOVE_RESPONSE_HEADER = function(
             "mini_waf_custom_adapter_handlers_remove_response_header",
             returnsVoid(POINTER, POINTER)
         );
@@ -1700,9 +1700,8 @@ final class Api {
         MemorySegment result
     ) {
         try {
-            return (MemorySegment) WAF_EVALUATION_RESULT_GET_MATCHED_RULE.invokeExact(
-                result
-            );
+            MethodHandle handle = WAF_EVALUATION_RESULT_GET_MATCHED_RULE;
+            return (MemorySegment) handle.invokeExact(result);
         } catch (Throwable failure) {
             throw rethrow(failure);
         }
@@ -1739,10 +1738,8 @@ final class Api {
         MemorySegment count
     ) {
         try {
-            return (MemorySegment) WAF_EVALUATION_RESULT_GET_LOGGED_RULES.invokeExact(
-                result,
-                count
-            );
+            MethodHandle handle = WAF_EVALUATION_RESULT_GET_LOGGED_RULES;
+            return (MemorySegment) handle.invokeExact(result, count);
         } catch (Throwable failure) {
             throw rethrow(failure);
         }
